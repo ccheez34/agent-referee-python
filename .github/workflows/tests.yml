@@ -17,12 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
         include:
+          # GitHub's Mac machines are scarce (jobs were cancelled for capacity), so macOS runs the oldest and newest.
+          - { os: macos-latest, python: "3.9" }
+          - { os: macos-latest, python: "3.13" }
           # Newer Python: free use must work; paying may not install yet (x402 needs ckzg builds), so it's tried, not required.
           - { os: ubuntu-latest, python: "3.14", experimental: true }
-          - { os: macos-latest, python: "3.14", experimental: true }
           - { os: windows-latest, python: "3.14", experimental: true }
     continue-on-error: ${{ matrix.experimental == true }}
     steps:
