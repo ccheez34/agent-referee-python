@@ -399,3 +399,13 @@ def test_multi_part_receipts_are_refused_clearly_until_supported():
     assert c["ok"] is False and "doesn't know the review-3x2 review tier" in c["problems"][0]
     weird = dict(unknown_tier, tier=["review-3"])
     assert verify_review_outcome(weird)["ok"] is False  # an unhashable tier is refused, not a crash
+    # Any receipt_format is refused, including null and made-up ones, and a judge-3x2 tier without one.
+    for fmt in (None, "foo", "review-multi-v2"):
+        c = verify_outcome(dict(judge_plain, receipt_format=fmt))
+        assert c["ok"] is False and "this version of agent-referee-client can't check" in c["problems"][0]
+    assert "the null format" in verify_outcome(dict(judge_plain, receipt_format=None))["problems"][0]  # as JS prints it
+    c = verify_outcome(dict(judge_plain, tier="judge-3x2"))
+    assert c["ok"] is False
+    from agent_referee_client import verify_series
+    s = verify_series([dict(judge_plain, receipt_format="judge-multi-v1")])
+    assert s["ok"] is False and "can't check" in s["problems"][0]

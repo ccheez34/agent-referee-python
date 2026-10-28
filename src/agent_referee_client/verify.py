@@ -702,6 +702,9 @@ def verify_series(receipts: Iterable[Any]) -> Dict[str, Any]:
     problems: List[str] = []
     if not ps:
         return {"ok": False, "problems": ["No receipts given."], "tally": None}
+    fps = [fp for fp in (_format_problem(x) for x in ps) if fp]
+    if fps:
+        return {"ok": False, "problems": fps[:1], "tally": None}
 
     def game_of(p: Any) -> Any:
         return _nn(_get(_get(p, "series"), "game"), 1)

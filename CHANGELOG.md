@@ -5,7 +5,8 @@
 - **Receipts in a format this version doesn't know are refused, never passed.** The coming multi-part review and
   judge tiers add a `receipt_format` field. `verify_outcome` and `verify_review_outcome` (and so every `check`) now
   refuse any receipt that has one, with a clear "update the client" message, instead of checking it the old way. A
-  review receipt with a tier this version doesn't know gets a clear message too.
+  review receipt with a tier this version doesn't know gets a clear message too, and `verify_series` refuses a
+  series that includes such a receipt.
 - **Type hints work in type checkers:** the package now ships a `py.typed` marker.
 - README: tested on Linux, macOS and Windows with Python 3.9 to 3.14; paying doesn't install on Python 3.15 yet
   (`ckzg` has no 3.15 build); how to call the client from async code.
