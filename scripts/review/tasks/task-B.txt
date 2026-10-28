@@ -1,0 +1,25 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (B): the payment-proof stores (end of pay.py) and _canonical.py.
+
+Requirements, proof stores:
+1. A FileProofStore save writes one JSON file per key, with the key, the proof, saved_at and saved_ts, plus the given info (match_id, seat).
+   - The default folder is the user data folder: %LOCALAPPDATA%\agent-referee\proofs on Windows, ~/Library/Application Support/agent-referee/proofs on macOS, $XDG_DATA_HOME or ~/.local/share/agent-referee/proofs elsewhere.
+   - Where the OS supports it, the folder is owner-only (0700) and the file is too (0600).
+   - The data is on disk when save returns, because the caller sends the paid request right after.
+2. remove is idempotent. list returns every readable entry and skips unreadable files.
+3. MemoryProofStore has the same interface and keeps entries in memory.
+
+Requirements, canonical JSON and randomness (must be byte-identical to the service's TypeScript):
+4. canonical_json follows the service's canonicalJson rules:
+   - Objects: keys sorted with JavaScript's default sort (UTF-16 code units), written as "key":value, joined with commas, no whitespace.
+   - Strings: escaped like JSON.stringify. That means \" \\ \b \f \n \r \t; other U+0000 to U+001F as \u00xx in lowercase; lone surrogates as \udxxx in lowercase; every other character written as is.
+   - Numbers: written like JavaScript's Number toString. That means the shortest round-trip digits; exponent form at 1e21 and above or below 1e-6; -0 as 0; NaN and Infinity as null. Integers above 2^53 are rounded like a JavaScript double.
+   - null, true and false are written as such.
+5. sha256_hex is the SHA-256 of the UTF-8 bytes, made the way JavaScript's TextEncoder makes them (a lone surrogate becomes U+FFFD), as lowercase hex. utf16_len equals JavaScript's .length.
+6. commitment(value, nonce) is sha256_hex(value + ":" + nonce).
+7. combined_random is sha256_hex(match_id|round|seat=seed|...), with seats sorted as in 4. Its value is the first 16 hex digits as an integer.
+8. weighted_pick and draw_pick:
+   - weighted_pick: sort the seats, take r modulo the total weight, then walk the seats subtracting weights.
+   - draw_pick is r modulo the number of options.
+9. random_hex uses a cryptographically secure generator.

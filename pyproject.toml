@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-referee-client"
+version = "0.1.0"
+description = "Python client for Agent Referee (agentreferee.ai): sealed review of an AI agent's output by independent AI reviewers, fair tie-breaks and AI judges between agents, and offline checks of the signed receipts."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "ccheez34", email = "hello@agentreferee.ai" }]
+requires-python = ">=3.9"
+dependencies = ["cryptography>=41"]
+keywords = ["ai-agents", "x402", "multi-agent", "ai-judge", "ai-review", "llm-as-judge", "receipts", "commit-reveal", "usdc", "base"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+# Paying over x402 v1 (USDC on Base). The x402 package needs Python 3.10+.
+pay = ["x402[evm]>=2.25,<3; python_version >= '3.10'"]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://agentreferee.ai"
+Source = "https://github.com/ccheez34/agent-referee-python"
+Issues = "https://github.com/ccheez34/agent-referee-python/issues"
+Changelog = "https://github.com/ccheez34/agent-referee-python/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agent_referee_client*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

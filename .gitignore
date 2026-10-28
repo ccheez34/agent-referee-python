@@ -1,0 +1,11 @@
+dist/
+build/
+*.egg-info/
+__pycache__/
+.venv*/
+.ruff_cache/
+.pytest_cache/
+# Payment proofs and live-test receipts: never commit these.
+.agent-referee-proofs/
+scripts/live-data/
+scripts/review/pieces/

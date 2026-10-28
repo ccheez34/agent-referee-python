@@ -1,0 +1,4 @@
+include README.md CHANGELOG.md LICENSE SECURITY.md
+recursive-include tests *.py *.json *.mjs
+recursive-include examples *.py
+prune scripts

@@ -1,0 +1,28 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (D): creating, joining and recovering matches.
+
+Requirements (mirror the JavaScript client's join loop):
+1. create:
+   - Merges a dict with keyword arguments and leaves out None.
+   - Adds "demo": true for a demo client.
+   - Remembers the settings it asked for (settings_of), by match_id, so the receipt can be checked later.
+2. join:
+   - Reads the match status first. In an invite match only the host_pays seat may use join(); any other seat gets an error pointing to accept_invite.
+   - The routes are /join/{tier}, /host/join/{tier} for the invite host, /join/draw/mediator and /join/draw/party for draws, and the same with a /demo prefix for demo matches.
+   - private_record is sent only when it's a bool. Demo joins never pay.
+3. 408 means the other side didn't show, and nothing was charged. Retry join_retries times (the invite host: ceil(invite_wait_s / 15)). After that, raise RefereeError 408 saying "You were not charged" (for the host, also that the invite still works).
+4. Any other failure:
+   - If a payment for this exact join is still pending (the reply was lost, or a 5xx), recover with POST /matches/{id}/recover {payment} instead of paying again.
+   - A 404 from recovery means that payment never settled: forget the proof and retry (this uses up a retry). When out of retries, raise the original error.
+   - Any other recovery error is raised.
+5. A 2xx without a seat_token after paying is recovered with that payment.
+6. The returned Seat gets the requested settings (what it created, or the status's settings without the mediator) and the join acknowledgment.
+7. recover_pending(store, min_age_s=120), for each saved proof:
+   - Entries without match_id or proof are removed. Proofs younger than min_age_s are left untouched (another agent's join may still be running, and recovering would replace that agent's token).
+   - Otherwise recover. Return a Seat when a token comes back, and remove the proof when it's recovered or the match is over.
+   - On 404 or 400, remove the proof. On any other error (the network, say), keep it.
+8. One seat is never paid for twice by this code.
+
+Context (not checked here): part C saves and deletes proofs around the paid request.
+Also context: the service refuses host_pays for draw matches, so a draw never has an invite host. Draw party joins go to a route the service never charges for, so a 402 can't happen there.

@@ -1,0 +1,28 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (E): invites, waiting, and sealed review.
+
+Requirements:
+1. _parse_invite accepts {match_id, invite_token} or a link https://HOST/invite/MATCHID?token=TOKEN, where MATCHID is 24 lowercase hex characters.
+   - The link's origin must be the client's own, or both must be official addresses (https://agentreferee.ai and https://agent-referee.fairplayclub.workers.dev).
+   - Anything else is refused with a clear message.
+2. accept_invite:
+   - POST /invite/join. The seat gets the match's settings and the acknowledgment.
+   - It waits while the phase is "joining", for up to invite_wait_s, then raises RefereeError 408 saying the seat is kept.
+3. wait_for polls every poll_s until fn(status) is true or the phase is done, expired or error.
+   - It calls on_receipt exactly once per finished match, even with two threads sharing the client.
+   - It raises RefereeError after timeout_s.
+4. review(task, output, tier, title, criteria, panel, free):
+   - A demo client refuses unless free=True. The tier must be review or review-3.
+   - free=True posts to /free/{tier} and never pays. A paid review posts to /{tier} with payment.
+5. Long inputs: if panel names models and task + output (UTF-16 length) is over GET /reviewers long_inputs.max_chars_for_light_models, refuse before sending a model named in long_inputs.light_models.
+   - The message ends "Nothing was charged." for a paid review, or "Your free review wasn't used." for a free one.
+   - The limit is read, never hard-coded. If /reviewers can't be read, leave the check to the service.
+6. Failures:
+   - A paid review with no answer raises RefereeError 0, explaining that a charge without a receipt is possible, to check basescan.org, and to email hello@agentreferee.ai.
+   - A 2xx without a result or receipt raises a clear error: for free, nothing was charged; for paid, it settled, so email with the transaction hash.
+7. The check:
+   - It covers the signature (against the trusted keys) plus verify_review_outcome with the task, output, tier, panel, and funding "free" for free reviews.
+   - For a paid review, check.ok is also false if the receipt says funding "free" or names a payer other than the payer's wallet.
+   - The result is the service's answer plus check, and for paid reviews payment {wallet, transaction, network}.
+8. verify_review and verify_receipt use the trusted keys. verify_receipt is False for anything without a signature.

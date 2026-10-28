@@ -1,0 +1,14 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (A): pay.py up to the proof stores, the paying side.
+
+Requirements:
+1. read_wallet_key(path) returns the file's single 0x-prefixed 64-hex value, or if there are several, the single one on a line containing "key". Otherwise it raises. It never prints or logs the key, and error messages never contain it.
+2. X402Payer(private_key, max_micro, network="base", pay_to=None): max_micro (USDC micro-units, 1,000,000 = $1) is required, a positive whole number, with no default. The key is validated. Below Python 3.10, or without the x402 package, it raises a clear error.
+3. Signing is done only by the official x402 package's version-1 "exact" EVM scheme. No EIP-3009 signing is written by hand. Only x402 version 1 on the one configured network is registered.
+4. payment_header(body, headers) raises PaymentRefused BEFORE anything is signed when no offer in the 402 body fits: every offer is above max_micro, on another network, or (with pay_to set) paying another recipient. After signing, it decodes the header and checks the signed amount, network and recipient again, and raises instead of returning a header that breaks the cap. It returns the exact base64 X-PAYMENT value.
+5. No default inside the payment library may silently block a price at or below max_micro.
+6. settled(headers) decodes X-PAYMENT-RESPONSE (base64 JSON) and never raises.
+7. Nothing in this part logs or stores the key or a signed payment.
+
+Context (not checked here): part C calls payment_header on a 402, saves the result as a recovery proof for joins, and sends it.

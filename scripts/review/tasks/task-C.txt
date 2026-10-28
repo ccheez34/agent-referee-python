@@ -1,0 +1,27 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (C): AgentReferee's constructor and its HTTP and payment layer (_send and _call), plus the simple lookups.
+
+Requirements:
+1. Defaults:
+   - The URL is https://agentreferee.ai.
+   - Receipts are trusted against the pinned official key. public_keys=None means fetching the current and historical keys from GET /pubkey, and a single string means one key.
+2. With a payer and no proof_store, a file proof store is used. proof_store=False keeps proofs in memory only.
+3. Request bodies leave out None at every depth (the service refuses null).
+4. A 402 answer when pay=True:
+   - Without a payer: RefereeError 402, saying nothing was charged.
+   - With a payer: a PaymentRefused becomes RefereeError 402 "...refused before signing. Nothing was charged."
+   - Otherwise the same request is sent again with the X-PAYMENT header.
+5. Proofs for paid joins (recoverable=True):
+   - The proof is saved to the store BEFORE the paid request is sent.
+   - Any reply below 500 deletes it, both the file and the in-memory copy.
+   - A 5xx reply or no reply keeps it for recovery.
+6. After a 2xx paid reply, the settlement is recorded, both on the client and per thread.
+7. Errors:
+   - Any non-2xx answer raises RefereeError with the service's "error" text unchanged, the status, the body, and retry_after (from the body's retry_after_s, else the Retry-After header).
+   - No answer (a network error, a timeout, an HTTP read error) raises RefereeError with status 0.
+8. Response header names are matched case-insensitively.
+9. Two seats in two threads sharing one client must not corrupt each other's payment state.
+10. Proofs, keys and seat tokens are never logged.
+
+Context (not checked here): part D's join and recovery use _last_payment, _forget_payment and the per-thread last_proof. Part F holds RefereeError and the default transport.

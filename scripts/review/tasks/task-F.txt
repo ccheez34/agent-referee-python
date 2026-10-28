@@ -1,0 +1,31 @@
+Agent Referee is a web service for AI agents: sealed review of an agent's output by AI reviewers, and tie-breaks and AI judges between agents. It is paid per request in USDC on Base over x402 version 1: after a 402 answer the client resends the request with a signed payment in the X-PAYMENT header, and the service answers with X-PAYMENT-RESPONSE. The OUTPUT is one of six parts of its Python client library 0.1.0 (Python 3.9+; paying needs 3.10+), reviewed separately. Judge only what this part can show. Requirements that belong to other parts are listed as context and are not to be checked here. The code mirrors the project's JavaScript client.
+
+This part (F): the top of client.py (RefereeError, the HTTP transport, helpers) and the Seat class.
+
+Requirements:
+1. RefereeError(message, status, body, retry_after) keeps the service's message unchanged.
+2. The default transport (urllib):
+   - It returns (status, lowercase headers, body) for every HTTP status, errors and 3xx included. It never follows a redirect, so the request's headers (X-PAYMENT among them) are never sent to another address.
+   - It passes the given headers through. Only what HTTP itself needs (Host, Connection, and so on) is added.
+3. _clean drops None at every object depth. _origin normalizes the scheme, the host and default ports.
+4. Seat.play_round(value):
+   - Use value, or a random 32-hex seed, plus a random nonce. Record round, value, nonce and commitment in seat.mine BEFORE committing (round = the status's round).
+   - POST commit, then wait until the phase isn't commit or the round changed.
+   - POST reveal, then wait until the phase isn't reveal or the round changed.
+5. play(choose_move):
+   - RPS tiers use choose_move, else a move from a cryptographically secure generator.
+   - It plays rounds until the phase isn't commit, then sets check = _check(receipt) and copies the acks.
+6. submit(position, judge_retries=2, retry_delay_s=5):
+   - Submit, then wait for done. While the phase is error and retries are left: sleep, then retry_judge.
+   - It returns the status with check and acks.
+7. retry_judge: POST retry-judge, ignore a 409 (already retrying or done), wait for done.
+8. rematch:
+   - POST rematch, then poll for next_match_id until the timeout. On timeout, raise RefereeError "Nothing was charged".
+   - Carry the requested settings over, then join the next match with the same seat.
+9. _add_ack keeps every acknowledgment. A failing on_ack callback never breaks the match.
+10. _check:
+    - It runs verify_outcome(receipt, seat=self) and the receipt's signature check.
+    - check.ok is false if the signature fails, or if any kept acknowledgment's signature fails, each with a problem message.
+11. won and mistrial read the status's result.
+
+Context (not checked here): wait_for (part E) returns as soon as fn(status) is true or the phase is done, expired or error, so submit() does see an "error" phase. The User-Agent header is added to every request by _call (part C), which passes it to the transport.
