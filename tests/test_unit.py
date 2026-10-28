@@ -363,7 +363,20 @@ def test_the_default_transport_never_follows_a_redirect_so_a_payment_header_neve
 # a receipt in either format must be refused with a clear message, never passed. The judge case is the dangerous one:
 # a receipt that kept tier "judge-3" and only added receipt_format would pass the old checks, because the verdict
 # recomputes from the votes. The JS client's test/format-refusal.test.mjs runs the same cases.
-FORMAT_MSG = "format, which this version of agent-referee-client can't check, so nothing was confirmed. Update the client ("
+UPDATE = "Update the client (pip install -U agent-referee-client)."
+FALSY_AND_ODD = [None, "", 0, False, "foo"]  # every one is refused, not just truthy strings
+
+
+def format_msg(shown):
+    return f"This receipt uses the {shown} format, which this version of agent-referee-client can't check, so nothing was confirmed. {UPDATE}"
+
+
+def _shown(fmt):  # how both clients print a value (JavaScript's String())
+    if fmt is None:
+        return "null"
+    if isinstance(fmt, bool):  # checked before int: in Python, False == 0
+        return "true" if fmt else "false"
+    return str(fmt)
 
 
 def _fixtures():
@@ -386,34 +399,35 @@ def _review_multi(review):
 
 
 def test_control_todays_receipts_still_pass():
-    from agent_referee_client import verify_outcome, verify_review_outcome
+    from agent_referee_client import verify_outcome, verify_review_outcome, verify_series
 
     judge, review, task, output = _fixtures()
     assert verify_outcome(judge)["ok"] is True
     assert verify_review_outcome(review)["ok"] is True
     assert verify_review_outcome(review, task=task, output=output, tier="review-3")["ok"] is True
+    assert verify_series([judge])["ok"] is True  # so the series refusals below aren't a check that refuses everything
 
 
 def test_judge_receipts_with_any_format_are_refused_even_as_judge_3():
     from agent_referee_client import verify_outcome
 
     judge = _fixtures()[0]
-    for fmt in ("judge-multi-v1", None, "foo"):
-        c = verify_outcome(dict(judge, receipt_format=fmt))
-        assert c["ok"] is False and FORMAT_MSG in c["problems"][0], fmt
-    assert "uses the null format" in verify_outcome(dict(judge, receipt_format=None))["problems"][0]  # as JS prints it
-    c = verify_outcome(dict(judge, tier="judge-3x2"))
-    assert c["ok"] is False and 'Unknown tier "judge-3x2"' in c["problems"][0]
+    for fmt in ["judge-multi-v1", *FALSY_AND_ODD]:
+        assert verify_outcome(dict(judge, receipt_format=fmt))["problems"] == [format_msg(_shown(fmt))], fmt
+        assert verify_outcome(dict(judge, receipt_format=fmt))["ok"] is False
+    for tier in ("judge-3x2", ["judge-3"]):
+        c = verify_outcome(dict(judge, tier=tier))
+        assert c["ok"] is False and c["problems"] == [f'Unknown tier "{_shown(tier) if not isinstance(tier, list) else "judge-3"}".']
 
 
 def test_review_receipts_with_any_format_are_refused_with_or_without_texts():
     from agent_referee_client import verify_review_outcome
 
     _, review, task, output = _fixtures()
-    for r in (_review_multi(review), dict(review, receipt_format=None), dict(review, receipt_format="foo")):
+    for r in [_review_multi(review)] + [dict(review, receipt_format=f) for f in FALSY_AND_ODD]:
         for kw in ({}, {"task": task, "output": output}):
             c = verify_review_outcome(r, **kw)
-            assert c["ok"] is False and FORMAT_MSG in c["problems"][0], (r.get("receipt_format"), kw)
+            assert c["ok"] is False and c["problems"] == [format_msg(_shown(r["receipt_format"]))], (r["receipt_format"], kw)
 
 
 def test_unknown_review_tiers_are_refused_clearly():
@@ -421,7 +435,7 @@ def test_unknown_review_tiers_are_refused_clearly():
 
     review = _fixtures()[1]
     c = verify_review_outcome(dict(review, tier="review-3x2"))
-    assert c["ok"] is False and "doesn't know the review-3x2 review tier, so nothing was confirmed. Update the client (" in c["problems"][0]
+    assert c["ok"] is False and c["problems"] == [f"This client doesn't know the review-3x2 review tier, so nothing was confirmed. {UPDATE}"]
     assert verify_review_outcome(dict(review, tier=["review-3"]))["ok"] is False  # an odd tier value is refused, not a crash
 
 
@@ -429,6 +443,7 @@ def test_series_with_an_unknown_format_receipt_anywhere_is_refused():
     from agent_referee_client import verify_series
 
     judge = _fixtures()[0]
-    for series in ([dict(judge, receipt_format="judge-multi-v1")], [judge, dict(judge, receipt_format=None)], [judge, dict(judge, receipt_format="foo")]):
+    bad = lambda f: dict(judge, receipt_format=f)  # noqa: E731
+    for series, fmt in (([bad("judge-multi-v1")], "judge-multi-v1"), ([judge, bad(None)], None), ([judge, judge, bad("foo")], "foo"), ([bad(""), judge], "")):
         c = verify_series(series)
-        assert c["ok"] is False and FORMAT_MSG in c["problems"][0]
+        assert c["ok"] is False and c["problems"] == [format_msg(_shown(fmt))]
