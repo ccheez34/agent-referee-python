@@ -360,52 +360,75 @@ def test_the_default_transport_never_follows_a_redirect_so_a_payment_header_neve
 
 
 # The multi-part tiers (spec draft 3) add receipt formats this version can't check. Until the client learns them,
-# a receipt in either format must be refused with a clear message, never passed. The judge format is the dangerous
-# one: it keeps tier "judge-3" and only swaps each side's submission fields, so the old checks would pass it.
-def _multi_part_receipts():
-    import copy
+# a receipt in either format must be refused with a clear message, never passed. The judge case is the dangerous one:
+# a receipt that kept tier "judge-3" and only added receipt_format would pass the old checks, because the verdict
+# recomputes from the votes. The JS client's test/format-refusal.test.mjs runs the same cases.
+FORMAT_MSG = "format, which this version of agent-referee-client can't check, so nothing was confirmed. Update the client ("
+
+
+def _fixtures():
     import json
     import pathlib
 
     here = pathlib.Path(__file__).parent
+    fx = json.loads((here / "fixture_review.json").read_text("utf-8"))
+    v = json.loads((here / "vectors.json").read_text("utf-8"))
+    judge = next(m["receipt"]["payload"] for m in v["matches"] if m["receipt"]["payload"]["tier"] == "judge-3")
+    return judge, fx["receipt"]["payload"], fx["input"]["task"], fx["input"]["output"]
+
+
+def _review_multi(review):
     from agent_referee_client import canonical_json, sha256_hex
 
-    fx = json.loads((here / "fixture_review.json").read_text("utf-8"))
-    r = copy.deepcopy(fx["receipt"]["payload"])
-    r.update(tier="review-3x2", receipt_format="review-multi-v1")
-    del r["output_sha256"]
+    r = {k: x for k, x in review.items() if k != "output_sha256"}
     pieces = [{"index": 1, "name": "", "sha256": sha256_hex("a"), "chars": 1}, {"index": 2, "name": "", "sha256": sha256_hex("b"), "chars": 1}]
-    r["pieces"], r["pieces_sha256"] = pieces, sha256_hex(canonical_json(pieces))
-    v = json.loads((here / "vectors.json").read_text("utf-8"))
-    plain = next(m["receipt"]["payload"] for m in v["matches"] if m["receipt"]["payload"]["tier"] == "judge-3")
-    j = copy.deepcopy(plain)
-    j["receipt_format"] = "judge-multi-v1"
-    sides = j["proof"].pop("submission_sha256")
-    j["proof"]["pieces"] = {s: [{"index": 1, "sha256": sha256_hex("x"), "chars": 1}] for s in sides}
-    return r, j, plain
+    return dict(r, tier="review-3x2", receipt_format="review-multi-v1", pieces=pieces, pieces_sha256=sha256_hex(canonical_json(pieces)))
 
 
-def test_multi_part_receipts_are_refused_clearly_until_supported():
+def test_control_todays_receipts_still_pass():
     from agent_referee_client import verify_outcome, verify_review_outcome
 
-    review_multi, judge_multi, judge_plain = _multi_part_receipts()
-    assert verify_outcome(judge_plain)["ok"] is True  # control: the same receipt in today's format passes
-    for check in (verify_outcome(judge_multi), verify_review_outcome(review_multi), verify_review_outcome(review_multi, task="t", output="a")):
-        assert check["ok"] is False
-        assert "format, which this version of agent-referee-client can't check" in check["problems"][0]
-    unknown_tier = dict(review_multi)
-    del unknown_tier["receipt_format"]
-    c = verify_review_outcome(unknown_tier)
-    assert c["ok"] is False and "doesn't know the review-3x2 review tier" in c["problems"][0]
-    weird = dict(unknown_tier, tier=["review-3"])
-    assert verify_review_outcome(weird)["ok"] is False  # an unhashable tier is refused, not a crash
-    # Any receipt_format is refused, including null and made-up ones, and a judge-3x2 tier without one.
-    for fmt in (None, "foo", "review-multi-v2"):
-        c = verify_outcome(dict(judge_plain, receipt_format=fmt))
-        assert c["ok"] is False and "this version of agent-referee-client can't check" in c["problems"][0]
-    assert "the null format" in verify_outcome(dict(judge_plain, receipt_format=None))["problems"][0]  # as JS prints it
-    c = verify_outcome(dict(judge_plain, tier="judge-3x2"))
-    assert c["ok"] is False
+    judge, review, task, output = _fixtures()
+    assert verify_outcome(judge)["ok"] is True
+    assert verify_review_outcome(review)["ok"] is True
+    assert verify_review_outcome(review, task=task, output=output, tier="review-3")["ok"] is True
+
+
+def test_judge_receipts_with_any_format_are_refused_even_as_judge_3():
+    from agent_referee_client import verify_outcome
+
+    judge = _fixtures()[0]
+    for fmt in ("judge-multi-v1", None, "foo"):
+        c = verify_outcome(dict(judge, receipt_format=fmt))
+        assert c["ok"] is False and FORMAT_MSG in c["problems"][0], fmt
+    assert "uses the null format" in verify_outcome(dict(judge, receipt_format=None))["problems"][0]  # as JS prints it
+    c = verify_outcome(dict(judge, tier="judge-3x2"))
+    assert c["ok"] is False and 'Unknown tier "judge-3x2"' in c["problems"][0]
+
+
+def test_review_receipts_with_any_format_are_refused_with_or_without_texts():
+    from agent_referee_client import verify_review_outcome
+
+    _, review, task, output = _fixtures()
+    for r in (_review_multi(review), dict(review, receipt_format=None), dict(review, receipt_format="foo")):
+        for kw in ({}, {"task": task, "output": output}):
+            c = verify_review_outcome(r, **kw)
+            assert c["ok"] is False and FORMAT_MSG in c["problems"][0], (r.get("receipt_format"), kw)
+
+
+def test_unknown_review_tiers_are_refused_clearly():
+    from agent_referee_client import verify_review_outcome
+
+    review = _fixtures()[1]
+    c = verify_review_outcome(dict(review, tier="review-3x2"))
+    assert c["ok"] is False and "doesn't know the review-3x2 review tier, so nothing was confirmed. Update the client (" in c["problems"][0]
+    assert verify_review_outcome(dict(review, tier=["review-3"]))["ok"] is False  # an odd tier value is refused, not a crash
+
+
+def test_series_with_an_unknown_format_receipt_anywhere_is_refused():
     from agent_referee_client import verify_series
-    s = verify_series([dict(judge_plain, receipt_format="judge-multi-v1")])
-    assert s["ok"] is False and "can't check" in s["problems"][0]
+
+    judge = _fixtures()[0]
+    for series in ([dict(judge, receipt_format="judge-multi-v1")], [judge, dict(judge, receipt_format=None)], [judge, dict(judge, receipt_format="foo")]):
+        c = verify_series(series)
+        assert c["ok"] is False and FORMAT_MSG in c["problems"][0]
