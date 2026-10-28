@@ -20,9 +20,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
         include:
-          # GitHub's Mac machines are scarce (jobs were cancelled for capacity), so macOS runs the oldest and newest.
-          - { os: macos-latest, python: "3.9" }
+          # GitHub's Apple-silicon Macs were at capacity twice (jobs cancelled), so macOS runs one job on each Mac pool:
+          # Apple silicon (macos-latest) and Intel (macos-15-intel), oldest and newest Python.
           - { os: macos-latest, python: "3.13" }
+          - { os: macos-15-intel, python: "3.9" }
           # Newer Python: free use must work; paying may not install yet (x402 needs ckzg builds), so it's tried, not required.
           - { os: ubuntu-latest, python: "3.14", experimental: true }
           - { os: windows-latest, python: "3.14", experimental: true }
