@@ -54,3 +54,26 @@ jobs:
         env:
           AGENT_REFEREE_SERVER_SRC: ${{ github.workspace }}/server/src
         run: python -m pytest -rs
+
+  package:
+    # Builds the wheel and source package exactly as a release would, and checks what's in them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: The wheel has the code, py.typed and the license, and nothing else
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          print("\n".join(names))
+          need = ["agent_referee_client/py.typed", "agent_referee_client/verify.py", "agent_referee_client/pay.py"]
+          assert all(n in names for n in need), "missing: " + str([n for n in need if n not in names])
+          assert any(n.endswith("licenses/LICENSE") for n in names), "no license file"
+          assert not any(n.startswith(("tests/", "scripts/")) for n in names), "tests or scripts in the wheel"
+          PY
