@@ -1,26 +1,29 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-referee-client"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python client for Agent Referee (agentreferee.ai): sealed review of an AI agent's output by independent AI reviewers, fair tie-breaks and AI judges between agents, and offline checks of the signed receipts."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "ccheez34", email = "hello@agentreferee.ai" }]
 requires-python = ">=3.9"
 dependencies = ["cryptography>=41"]
 keywords = ["ai-agents", "x402", "multi-agent", "ai-judge", "ai-review", "llm-as-judge", "receipts", "commit-reveal", "usdc", "base"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+  "Typing :: Typed",
   "Intended Audience :: Developers",
   "Topic :: Software Development :: Libraries",
 ]
@@ -35,6 +38,9 @@ Homepage = "https://agentreferee.ai"
 Source = "https://github.com/ccheez34/agent-referee-python"
 Issues = "https://github.com/ccheez34/agent-referee-python/issues"
 Changelog = "https://github.com/ccheez34/agent-referee-python/blob/main/CHANGELOG.md"
+
+[tool.setuptools.package-data]
+agent_referee_client = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

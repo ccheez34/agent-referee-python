@@ -236,6 +236,21 @@ def panel_problem(panel: Any, models: List[str], selection: Any) -> Optional[str
 # ---------------------------------------------------------------------------------------------------------------
 
 
+#: Receipt formats this client can check. Today's receipts have no ``receipt_format`` field at all; the multi-part
+#: tiers (``review-multi-v1``, ``judge-multi-v1``) will add one. A receipt with any other format is refused, never
+#: checked the old way: an old check could recompute the verdict and miss what the new format changed.
+KNOWN_RECEIPT_FORMATS: tuple = ()
+
+
+def _format_problem(p: Any) -> Optional[str]:
+    if isinstance(p, dict) and "receipt_format" in p and p["receipt_format"] not in KNOWN_RECEIPT_FORMATS:
+        return (
+            f"This receipt uses the {_s(p['receipt_format'])[:60]} format, which this version of agent-referee-client "
+            "can't check, so nothing was confirmed. Update the client (pip install -U agent-referee-client)."
+        )
+    return None
+
+
 def verify_review_outcome(
     receipt: Any,
     task: Optional[str] = None,
@@ -261,6 +276,13 @@ def verify_review_outcome(
     ]
     if not _same(_get(p, "type"), "review"):
         return {"ok": False, "problems": ["Not a sealed-review receipt."], "trusts": trusts}
+    fp = _format_problem(p)
+    if fp:
+        return {"ok": False, "problems": [fp], "trusts": trusts}
+    if not isinstance(_get(p, "tier"), str) or _get(p, "tier") not in _REVIEW_SIZE:
+        return {"ok": False, "problems": [
+            f"This client doesn't know the {_s(_get(p, 'tier'))[:40]} review tier, so nothing was confirmed. Update the "
+            "client (pip install -U agent-referee-client)."], "trusts": trusts}
     if tier and not _same(_get(p, "tier"), tier):
         problems.append(f"This review is {_s(_get(p, 'tier'))}, not {tier}.")
     if output is not None and not _same(sha256_hex(output), _get(p, "output_sha256")):
@@ -536,6 +558,9 @@ def verify_outcome(receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]]
     trusts: List[str] = []
     if not _truthy(_get(p, "tier")) or not _truthy(_get(p, "outcome")):
         return {"ok": False, "recomputed": False, "problems": ["Not a receipt payload."], "trusts": trusts, "evidence": []}
+    fp = _format_problem(p)
+    if fp:
+        return {"ok": False, "recomputed": False, "problems": [fp], "trusts": trusts, "evidence": []}
     out = p["outcome"]
     proof = _nn(_get(p, "proof"), {})
 

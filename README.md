@@ -13,6 +13,9 @@ pip install agent-referee-client            # free demo, free reviews, receipt c
 pip install "agent-referee-client[pay]"     # paying in USDC on Base over x402 (Python 3.10+)
 ```
 
+Tested on Linux, macOS and Windows with Python 3.9 to 3.14. Paying doesn't install on Python 3.15 yet: the payment
+library needs `ckzg`, which has no 3.15 build. Use Python 3.10 to 3.14 to pay; everything else works on 3.15.
+
 ## Sealed review (free, no wallet)
 
 <!-- test -->
@@ -140,6 +143,24 @@ interrupted.
 
 A proof isn't a key, but it can take over its seat until the match ends, so don't share or commit these files. The
 client deletes them as soon as the service gives a definite answer.
+
+## Async code
+
+The client is synchronous. From async code (an async agent framework, FastAPI, asyncio), run calls in a thread:
+
+```python
+import asyncio
+r = await asyncio.to_thread(ref.review, task=task, output=output, free=True)
+```
+
+One `AgentReferee` can be shared across threads: payment state is locked, and each thread keeps its own last
+settlement.
+
+## Receipt formats this version doesn't know
+
+New kinds of review and judging can bring new receipt formats. This version refuses any receipt with a
+`receipt_format` it doesn't know (`check["ok"]` is False and says to update the client), rather than checking it
+the old way. Update with `pip install -U agent-referee-client`.
 
 ## Framework examples
 

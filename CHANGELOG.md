@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 (unreleased)
+
+- **Receipts in a format this version doesn't know are refused, never passed.** The coming multi-part review and
+  judge tiers add a `receipt_format` field. `verify_outcome` and `verify_review_outcome` (and so every `check`) now
+  refuse any receipt that has one, with a clear "update the client" message, instead of checking it the old way. A
+  review receipt with a tier this version doesn't know gets a clear message too.
+- **Type hints work in type checkers:** the package now ships a `py.typed` marker.
+- README: tested on Linux, macOS and Windows with Python 3.9 to 3.14; paying doesn't install on Python 3.15 yet
+  (`ckzg` has no 3.15 build); how to call the client from async code.
+- Packaging: the license is declared the current way (an SPDX `license = "MIT"`), so builds keep working after
+  setuptools drops the old form in 2027.
+
 ## 0.1.0 (2026-10-28)
 
 The full Python client, matching the JavaScript client 0.8.0.

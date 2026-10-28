@@ -357,3 +357,45 @@ def test_the_default_transport_never_follows_a_redirect_so_a_payment_header_neve
     finally:
         other.shutdown()
         first.shutdown()
+
+
+# The multi-part tiers (spec draft 3) add receipt formats this version can't check. Until the client learns them,
+# a receipt in either format must be refused with a clear message, never passed. The judge format is the dangerous
+# one: it keeps tier "judge-3" and only swaps each side's submission fields, so the old checks would pass it.
+def _multi_part_receipts():
+    import copy
+    import json
+    import pathlib
+
+    here = pathlib.Path(__file__).parent
+    from agent_referee_client import canonical_json, sha256_hex
+
+    fx = json.loads((here / "fixture_review.json").read_text("utf-8"))
+    r = copy.deepcopy(fx["receipt"]["payload"])
+    r.update(tier="review-3x2", receipt_format="review-multi-v1")
+    del r["output_sha256"]
+    pieces = [{"index": 1, "name": "", "sha256": sha256_hex("a"), "chars": 1}, {"index": 2, "name": "", "sha256": sha256_hex("b"), "chars": 1}]
+    r["pieces"], r["pieces_sha256"] = pieces, sha256_hex(canonical_json(pieces))
+    v = json.loads((here / "vectors.json").read_text("utf-8"))
+    plain = next(m["receipt"]["payload"] for m in v["matches"] if m["receipt"]["payload"]["tier"] == "judge-3")
+    j = copy.deepcopy(plain)
+    j["receipt_format"] = "judge-multi-v1"
+    sides = j["proof"].pop("submission_sha256")
+    j["proof"]["pieces"] = {s: [{"index": 1, "sha256": sha256_hex("x"), "chars": 1}] for s in sides}
+    return r, j, plain
+
+
+def test_multi_part_receipts_are_refused_clearly_until_supported():
+    from agent_referee_client import verify_outcome, verify_review_outcome
+
+    review_multi, judge_multi, judge_plain = _multi_part_receipts()
+    assert verify_outcome(judge_plain)["ok"] is True  # control: the same receipt in today's format passes
+    for check in (verify_outcome(judge_multi), verify_review_outcome(review_multi), verify_review_outcome(review_multi, task="t", output="a")):
+        assert check["ok"] is False
+        assert "format, which this version of agent-referee-client can't check" in check["problems"][0]
+    unknown_tier = dict(review_multi)
+    del unknown_tier["receipt_format"]
+    c = verify_review_outcome(unknown_tier)
+    assert c["ok"] is False and "doesn't know the review-3x2 review tier" in c["problems"][0]
+    weird = dict(unknown_tier, tier=["review-3"])
+    assert verify_review_outcome(weird)["ok"] is False  # an unhashable tier is refused, not a crash
