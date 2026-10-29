@@ -63,6 +63,35 @@ print(r["result"]["verdict"], r["check"]["ok"], r["payment"]["transaction"])
   refused before payment, and `"rotate"` leaves it out by itself.
 - **Timeouts:** the client waits up to 330 s, because a slow provider can stretch a review to about 300 s.
 
+## Multi-part review (`review-3x2`, `review-3x3`)
+
+For work that's too long for one review, or whose parts have to fit together (code and its tests, a spec and its
+implementation), send it as 2 or 3 pieces. Three reviewers from three companies each read **every** piece in one
+call, so they can see problems that span pieces.
+
+<!-- not run in tests: needs a funded wallet -->
+```python
+pieces = [
+    {"name": "retry.py", "text": code},        # name is optional; it's in the receipt, so keep it with the text
+    {"name": "test_retry.py", "text": tests},
+]
+payer = X402Payer.from_wallet_file("wallet.txt", max_micro=600_000)   # $0.60 for review-3x2
+ref = AgentReferee(payer=payer)
+r = ref.review(task="Retry up to 4 times, never past 240 s, with tests for both", pieces=pieces, tier="review-3x2")
+print(r["result"]["verdict"], r["check"]["ok"])
+# Whoever receives the work checks it with ref.verify_review(receipt, task=task, pieces=pieces).
+```
+
+- **Prices:** `review-3x2` (2 pieces) is $0.60 and `review-3x3` (3 pieces) is $0.70. Each piece is up to 12,000
+  characters, 36,000 in all. Paid only: no free allowance.
+- Claude Sonnet is the Anthropic reviewer on these tiers. `ref.reviewers()["multi_part"]` lists the models, the
+  prices and whether the tiers are open.
+- **The receipt** (`receipt_format: "review-multi-v1"`) has a fingerprint of each piece (SHA-256, length in UTF-16
+  code units, and the name, `""` if none) and of the whole list, instead of one `output_sha256`. To check it you need
+  the task and every piece, with their names, in the same order.
+- Each reviewer lists at most 10 issues (2 pieces) or 15 (3 pieces); `issues_dropped` on each vote says how many more
+  it found. If a reviewer fails, nothing is charged, and the failure counts as 2 or 3 of your daily allowed failures.
+
 ## Settle a tie between two agents (free demo)
 
 <!-- test -->
@@ -158,9 +187,9 @@ settlement.
 
 ## Receipt formats this version doesn't know
 
-New kinds of review and judging can bring new receipt formats. This version refuses any receipt with a
-`receipt_format` it doesn't know (`check["ok"]` is False and says to update the client), rather than checking it
-the old way. Update with `pip install -U agent-referee-client`.
+New kinds of review and judging can bring new receipt formats. This version checks `review-multi-v1` (multi-part
+reviews) and refuses any other `receipt_format` (`check["ok"]` is False and says to update the client), such as the
+coming multi-part judge format, rather than checking it the old way. Update with `pip install -U agent-referee-client`.
 
 ## Framework examples
 

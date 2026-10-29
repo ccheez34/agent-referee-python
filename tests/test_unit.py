@@ -420,22 +420,36 @@ def test_judge_receipts_with_any_format_are_refused_even_as_judge_3():
         assert c["ok"] is False and c["problems"] == [f'Unknown tier "{_shown(tier) if not isinstance(tier, list) else "judge-3"}".']
 
 
-def test_review_receipts_with_any_format_are_refused_with_or_without_texts():
+def test_review_receipts_with_an_unknown_format_are_refused_with_or_without_texts():
     from agent_referee_client import verify_review_outcome
 
     _, review, task, output = _fixtures()
-    for r in [_review_multi(review)] + [dict(review, receipt_format=f) for f in FALSY_AND_ODD]:
+    for r in [dict(review, receipt_format="judge-multi-v1")] + [dict(review, receipt_format=f) for f in FALSY_AND_ODD]:
         for kw in ({}, {"task": task, "output": output}):
             c = verify_review_outcome(r, **kw)
             assert c["ok"] is False and c["problems"] == [format_msg(_shown(r["receipt_format"]))], (r["receipt_format"], kw)
+
+
+def test_review_multi_v1_is_checked_never_passed_on_a_shortcut():
+    # Since 0.2.0 the client knows review-multi-v1 (tests/test_multi.py runs the server's vectors). A receipt built
+    # from a single-piece one is still refused: its votes lack issues_dropped.
+    from agent_referee_client import verify_outcome, verify_review_outcome
+
+    judge, review, task, output = _fixtures()
+    m = verify_review_outcome(_review_multi(review), task=task, pieces=[{"text": "a"}, {"text": "b"}])
+    assert m["ok"] is False and any("issues_dropped" in x for x in m["problems"]), m["problems"]
+    old = verify_review_outcome(dict(review, receipt_format="review-multi-v1"), task=task, output=output)
+    assert old["problems"] == ["A review-multi-v1 receipt must be for a multi-part tier (review-3x2 or review-3x3), not review-3."]
+    j = verify_outcome(dict(judge, receipt_format="review-multi-v1"))  # a review format on a match receipt
+    assert j["problems"] == [format_msg("review-multi-v1")]
 
 
 def test_unknown_review_tiers_are_refused_clearly():
     from agent_referee_client import verify_review_outcome
 
     review = _fixtures()[1]
-    c = verify_review_outcome(dict(review, tier="review-3x2"))
-    assert c["ok"] is False and c["problems"] == [f"This client doesn't know the review-3x2 review tier, so nothing was confirmed. {UPDATE}"]
+    c = verify_review_outcome(dict(review, tier="review-9x9"))
+    assert c["ok"] is False and c["problems"] == [f"This client doesn't know the review-9x9 review tier, so nothing was confirmed. {UPDATE}"]
     assert verify_review_outcome(dict(review, tier=["review-3"]))["ok"] is False  # an odd tier value is refused, not a crash
 
 

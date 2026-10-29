@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- **Multi-part reviews (`review-3x2`, `review-3x3`).** `ref.review(task, pieces=[{"name"?, "text"}, ...],
+  tier="review-3x2")` sends the work as 2 or 3 pieces, and three reviewers from three companies each read every
+  piece. Mistakes (an `output`, the wrong number of pieces, or `free=True`, since these tiers are paid only) are
+  refused before anything is sent or paid for. `output` is now optional in `review()` (required for the single-piece
+  tiers, as before).
+- **`review-multi-v1` receipts are checked**, not refused: `verify_review_outcome` and `verify_review` take `pieces`
+  and confirm each piece's SHA-256, length (UTF-16 code units) and name in order, the `pieces_sha256` of the list,
+  that there's no `output_sha256`, three votes from three AI companies each with `issues_dropped`, and the majority
+  verdict and tally. Tested against the server's 17 signed test vectors (`tests/test_multi.py`), with the same
+  messages as the JS client 0.9.0.
+- Still refused: `judge-multi-v1` and any other format this version doesn't know, a `review-multi-v1` receipt on a
+  single-piece tier or a match receipt, and a multi-part tier without `receipt_format`.
+- `KNOWN_RECEIPT_FORMATS` is now a dict by kind of receipt (`{"review": (...), "match": (...)}`).
+
 ## 0.1.1 (2026-10-28)
 
 - **Receipts in a format this version doesn't know are refused, never passed.** The coming multi-part review and

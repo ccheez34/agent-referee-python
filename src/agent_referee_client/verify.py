@@ -13,7 +13,7 @@ import math
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
-from ._canonical import _utf16_key, canonical_json, sha256_hex
+from ._canonical import _utf16_key, canonical_json, sha256_hex, utf16_len
 
 __all__ = [
     "PUBLIC_KEY",
@@ -31,7 +31,7 @@ PUBLIC_KEY = "vM2GY6ZEYc/omRlIFrzu0TaMGtjHXQtchg9d7lPKkTY="
 
 REVIEW_VERDICTS = ["pass", "needs_changes", "fail", "cannot_assess"]
 JUDGE_TIERS = ["judge", "judge-2", "judge-3"]
-_REVIEW_SIZE = {"review": 1, "review-3": 3}
+_REVIEW_SIZE = {"review": 1, "review-3": 3, "review-3x2": 3, "review-3x3": 3}
 _RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
 
 
@@ -236,19 +236,78 @@ def panel_problem(panel: Any, models: List[str], selection: Any) -> Optional[str
 # ---------------------------------------------------------------------------------------------------------------
 
 
-#: Receipt formats this client can check. Today's receipts have no ``receipt_format`` field at all; the multi-part
-#: tiers (``review-multi-v1``, ``judge-multi-v1``) will add one. A receipt with any other format is refused, never
-#: checked the old way: an old check could recompute the verdict and miss what the new format changed.
-KNOWN_RECEIPT_FORMATS: tuple = ()
+MULTI_FORMAT = "review-multi-v1"
+#: Multi-part review tiers and how many pieces each takes. Three reviewers from three companies read every piece.
+MULTI_PIECES = {"review-3x2": 2, "review-3x3": 3}
+
+#: Receipt formats this client can check, by kind of receipt. Single-piece receipts have no ``receipt_format`` field;
+#: multi-part reviews are ``review-multi-v1``. Any other format (``judge-multi-v1`` until this client learns it, or a
+#: format on the wrong kind of receipt) is refused, never checked the old way: an old check could recompute the
+#: verdict and miss what the new format changed.
+KNOWN_RECEIPT_FORMATS: Dict[str, tuple] = {"review": (MULTI_FORMAT,), "match": ()}
 
 
-def _format_problem(p: Any) -> Optional[str]:
-    if isinstance(p, dict) and "receipt_format" in p and p["receipt_format"] not in KNOWN_RECEIPT_FORMATS:
+def _format_problem(p: Any, kind: str = "match") -> Optional[str]:
+    known = KNOWN_RECEIPT_FORMATS.get(kind, ())
+    if isinstance(p, dict) and "receipt_format" in p and not (isinstance(p["receipt_format"], str) and p["receipt_format"] in known):
         return (
             f"This receipt uses the {_s(p['receipt_format'])[:60]} format, which this version of agent-referee-client "
             "can't check, so nothing was confirmed. Update the client (pip install -U agent-referee-client)."
         )
     return None
+
+
+def _check_pieces(p: Any, output: Optional[str], pieces: Any, problems: List[str]) -> None:
+    """The multi-part part of a ``review-multi-v1`` check: the receipt's piece list is well formed, ``pieces_sha256``
+    is the hash of it, there's no ``output_sha256``, and (when you pass the pieces you hold) each piece's name, sha256
+    and chars match, in order. Pieces are ``{"name"?: str, "text": str}``; a piece without a name is recorded as ""."""
+    n = MULTI_PIECES[_get(p, "tier")]
+    if isinstance(p, dict) and "output_sha256" in p:
+        problems.append("A multi-part receipt never has output_sha256; this one does.")
+    if output is not None:
+        problems.append("This is a multi-part review: check it with pieces, not output.")
+    recs = _get(p, "pieces")
+    if not isinstance(recs, list) or len(recs) != n:
+        problems.append(f"A {_get(p, 'tier')} receipt lists {n} pieces; this one lists {len(recs) if isinstance(recs, list) else 'none'}.")
+        return
+    for i, r in enumerate(recs):
+        ok = (
+            isinstance(r, dict)
+            and _same(_get(r, "index"), i + 1)
+            and isinstance(_get(r, "name"), str)
+            and isinstance(_get(r, "sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", _get(r, "sha256")) is not None
+            and isinstance(_get(r, "chars"), int)
+            and not isinstance(_get(r, "chars"), bool)
+            and _get(r, "chars") > 0
+        )
+        if not ok:
+            problems.append(f"Piece {i + 1}'s record in the receipt is malformed.")
+    if not _same(sha256_hex(_canon(recs)), _get(p, "pieces_sha256")):
+        problems.append("pieces_sha256 doesn't match the receipt's list of pieces.")
+    if pieces is None:
+        return
+    if not isinstance(pieces, (list, tuple)) or len(pieces) != n:
+        problems.append(f"This review has {n} pieces; you passed {len(pieces) if isinstance(pieces, (list, tuple)) else 'something that is not a list'}.")
+        return
+    texts = [g.get("text") if isinstance(g, dict) else None for g in pieces]
+    hashes = [sha256_hex(t) if isinstance(t, str) else None for t in texts]
+    rec_hashes = [_s(_get(r, "sha256")) for r in recs]
+    if all(h is not None for h in hashes) and sorted(hashes) == sorted(rec_hashes) and hashes != rec_hashes:
+        problems.append("These are the review's pieces, but in a different order.")
+        return
+    for i, g in enumerate(pieces):
+        r = recs[i]
+        if hashes[i] is None:
+            problems.append(f"Piece {i + 1} you passed has no text.")
+            continue
+        if hashes[i] != _get(r, "sha256"):
+            problems.append(f"Piece {i + 1} is different from the one this review is about.")
+        elif not _same(utf16_len(texts[i]), _get(r, "chars")):
+            problems.append(f"Piece {i + 1}'s length in the receipt (chars) is wrong.")
+        name = g.get("name")
+        if not _same("" if name is None else name, _get(r, "name")):
+            problems.append(f"Piece {i + 1}'s name differs from the one in the receipt (names are part of pieces_sha256).")
 
 
 def verify_review_outcome(
@@ -258,8 +317,12 @@ def verify_review_outcome(
     tier: Optional[str] = None,
     panel: Any = None,
     funding: Optional[str] = None,
+    pieces: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Check a sealed-review receipt offline (not the signature: use :func:`verify_signature` for that).
+
+    For a multi-part review (``review-3x2``, ``review-3x3``; ``receipt_format: "review-multi-v1"``) pass ``pieces``
+    (the list of ``{"name"?, "text"}`` you hold, in order) instead of ``output``.
 
     Confirms it's a review (never a match receipt), that it's about exactly the ``task`` and ``output`` you pass
     (by SHA-256 of the exact text), that the reviewers are the ones you asked for (``panel``), that every vote
@@ -276,16 +339,29 @@ def verify_review_outcome(
     ]
     if not _same(_get(p, "type"), "review"):
         return {"ok": False, "problems": ["Not a sealed-review receipt."], "trusts": trusts}
-    fp = _format_problem(p)
+    fp = _format_problem(p, "review")
     if fp:
         return {"ok": False, "problems": [fp], "trusts": trusts}
-    if not isinstance(_get(p, "tier"), str) or _get(p, "tier") not in _REVIEW_SIZE:
+    t = _get(p, "tier")
+    multi = _same(_get(p, "receipt_format"), MULTI_FORMAT)
+    is_multi_tier = isinstance(t, str) and t in MULTI_PIECES
+    if multi and not is_multi_tier:
+        return {"ok": False, "problems": [
+            f"A {MULTI_FORMAT} receipt must be for a multi-part tier (review-3x2 or review-3x3), not {_s(t)[:40]}."], "trusts": trusts}
+    if is_multi_tier and not multi:
+        return {"ok": False, "problems": [
+            f"A {t} receipt must say receipt_format {MULTI_FORMAT}; this one doesn't, so it can't be checked."], "trusts": trusts}
+    if not isinstance(t, str) or t not in _REVIEW_SIZE:
         return {"ok": False, "problems": [
             f"This client doesn't know the {_s(_get(p, 'tier'))[:40]} review tier, so nothing was confirmed. Update the "
             "client (pip install -U agent-referee-client)."], "trusts": trusts}
     if tier and not _same(_get(p, "tier"), tier):
         problems.append(f"This review is {_s(_get(p, 'tier'))}, not {tier}.")
-    if output is not None and not _same(sha256_hex(output), _get(p, "output_sha256")):
+    if multi:
+        _check_pieces(p, output, pieces, problems)
+    elif pieces is not None:
+        problems.append("This is a single-piece review: check it with output, not pieces.")
+    if not multi and output is not None and not _same(sha256_hex(output), _get(p, "output_sha256")):
         problems.append("This review is about a different output than the one you have.")
     if task is not None and not _same(sha256_hex(task), _get(p, "task_sha256")):
         problems.append("This review is for a different task than the one you have.")
@@ -311,6 +387,15 @@ def verify_review_outcome(
             total = _weighted_total(scores, criteria)
             if not _same(_get(v, "total"), total):
                 problems.append(f"Vote {i + 1}'s weighted total doesn't match its scores.")
+    if multi:
+        if not _same(_get(reviewers, "decision_rule"), "majority"):
+            problems.append("A multi-part review is decided by majority; this receipt names another rule.")
+        if len({_company(m) for m in models}) != len(models):
+            problems.append("The reviewers aren't from three different AI companies.")
+        for i, v in enumerate(votes):
+            d = _get(v, "issues_dropped")
+            if not (isinstance(d, int) and not isinstance(d, bool) and d >= 0):
+                problems.append(f"Vote {i + 1} is missing issues_dropped (always present in a multi-part receipt).")
     tally = {k: 0 for k in REVIEW_VERDICTS}
     for v in votes:
         verdict = _get(v, "verdict")

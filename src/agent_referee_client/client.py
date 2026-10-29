@@ -1,7 +1,7 @@
 """The Agent Referee client: matches between agents, sealed reviews, and seat recovery.
 
 Synchronous, standard library only (plus ``cryptography`` for signature checks). Paying is optional: pass a payer
-from :mod:`agent_referee_client.pay`. Mirrors the JavaScript client 0.8.0.
+from :mod:`agent_referee_client.pay`. Mirrors the JavaScript client 0.9.0.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .verify import (
 
 __all__ = ["AgentReferee", "Seat", "RefereeError", "DEFAULT_URL", "OFFICIAL_URLS", "STATUS_PAGE"]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 DEFAULT_URL = "https://agentreferee.ai"
 #: Every address the official service answers on. An invite from any of them works with any of them.
@@ -47,7 +47,8 @@ JOIN_PATH = {
     "judge-2": "/join/judge-2",
     "judge-3": "/join/judge-3",
 }
-REVIEW_TIERS = ["review", "review-3"]
+REVIEW_TIERS = ["review", "review-3", "review-3x2", "review-3x3"]
+MULTI_PIECES = {"review-3x2": 2, "review-3x3": 3}
 MOVES = ["rock", "paper", "scissors"]
 
 log = logging.getLogger("agent_referee_client")
@@ -586,8 +587,9 @@ class AgentReferee:
     def review(
         self,
         task: str,
-        output: str,
+        output: Optional[str] = None,
         *,
+        pieces: Optional[List[Dict[str, Any]]] = None,
         tier: str = "review",
         title: Optional[str] = None,
         criteria: Optional[List[Dict[str, Any]]] = None,
@@ -603,6 +605,10 @@ class AgentReferee:
 
         ``panel``: "rotate", a list of model ids (1 for review, 3 for review-3), or a list of up to 5 such lists.
 
+        Multi-part: ``tier="review-3x2"`` or ``"review-3x3"`` takes the work as ``pieces`` (2 or 3 dicts
+        ``{"name"?: str, "text": str}``, up to 12,000 characters each, 36,000 in all) instead of ``output``. Three
+        reviewers from three companies each read every piece; $0.60 or $0.70, paid only (no free allowance).
+
         Returns the service's answer (``review_id``, ``result`` {verdict, tally, unanimous}, ``votes``, ``receipt``,
         and ``free`` for free reviews) plus ``check`` (signature, exact task and output, panel, recomputed verdict,
         and ``funding: "free"`` for free reviews) and, for paid reviews, ``payment`` (wallet and transaction).
@@ -612,10 +618,25 @@ class AgentReferee:
             raise RefereeError("Sealed review has no demo mode: every review is a real AI call. Use free=True for a free review.", 400, {})
         if tier not in REVIEW_TIERS:
             raise RefereeError(f"tier must be one of: {', '.join(REVIEW_TIERS)}", 400, {})
-        problem = self._long_input_problem(task, output, panel)
-        if problem:
-            raise RefereeError(f"{problem} {'Your free review wasn' + chr(39) + 't used.' if free else 'Nothing was charged.'}", 400, {})
-        body = {"task": task, "output": output, "title": title, "criteria": criteria, "panel": panel}
+        n = MULTI_PIECES.get(tier)
+        if n:
+            # Multi-part: the work goes in as pieces, never output. Checked here so a mistake costs nothing.
+            if free:
+                raise RefereeError(f"{tier} has no free allowance; it's paid only. Nothing was sent.", 400, {})
+            if output is not None:
+                raise RefereeError(f"{tier} takes the work as pieces=[{{'name'?, 'text'}}], not output. Nothing was sent.", 400, {})
+            if not isinstance(pieces, (list, tuple)) or len(pieces) != n:
+                raise RefereeError(f"{tier} takes exactly {n} pieces: [{{'name'?, 'text'}}]. Nothing was sent.", 400, {})
+            body = {"task": task, "pieces": list(pieces), "title": title, "criteria": criteria, "panel": panel}
+        else:
+            if pieces is not None:
+                raise RefereeError(f"pieces are for the multi-part tiers (review-3x2, review-3x3); {tier} takes one output. Nothing was sent.", 400, {})
+            if not isinstance(output, str):
+                raise RefereeError(f"{tier} needs the output to review. Nothing was sent.", 400, {})
+            problem = self._long_input_problem(task, output, panel)
+            if problem:
+                raise RefereeError(f"{problem} {'Your free review wasn' + chr(39) + 't used.' if free else 'Nothing was charged.'}", 400, {})
+            body = {"task": task, "output": output, "title": title, "criteria": criteria, "panel": panel}
         self._tl.settlement = None
         try:
             r = self._call("POST", f"/free/{tier}" if free else f"/{tier}", body, pay=not free)
@@ -640,7 +661,7 @@ class AgentReferee:
                 200,
                 {"answer": r, "settlement": settlement},
             )
-        check = self.verify_review(r["receipt"], task=task, output=output, tier=tier, panel=panel, funding="free" if free else None)
+        check = self.verify_review(r["receipt"], task=task, output=output, pieces=list(pieces) if n else None, tier=tier, panel=panel, funding="free" if free else None)
         if not free:
             p = (r["receipt"] or {}).get("payload") or {}
             wallet = getattr(self.payer, "wallet", None)
@@ -668,11 +689,12 @@ class AgentReferee:
         panel: Any = None,
         funding: Optional[str] = None,
         public_keys: Optional[Sequence[str]] = None,
+        pieces: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Check a sealed-review receipt: the service's signature plus everything :func:`verify_review_outcome`
-        checks. Pass the task and output you hold. Returns ``{ok, problems, trusts}``."""
+        checks. Pass the task and output (or, for a multi-part review, the pieces) you hold. Returns ``{ok, problems, trusts}``."""
         trusted = self._trusted_keys(public_keys)
-        res = verify_review_outcome(receipt, task=task, output=output, tier=tier, panel=panel, funding=funding)
+        res = verify_review_outcome(receipt, task=task, output=output, tier=tier, panel=panel, funding=funding, pieces=pieces)
         if not verify_signature(receipt, trusted):
             res["problems"].insert(0, "The receipt's signature doesn't check out against the service's key.")
             res["ok"] = False
