@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-10-28)
 
 - **Multi-part reviews (`review-3x2`, `review-3x3`).** `ref.review(task, pieces=[{"name"?, "text"}, ...],
   tier="review-3x2")` sends the work as 2 or 3 pieces, and three reviewers from three companies each read every
