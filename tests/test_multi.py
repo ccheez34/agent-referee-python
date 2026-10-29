@@ -128,3 +128,22 @@ def test_review_sends_pieces_never_output_and_checks_with_them(monkeypatch):
         with pytest.raises(RefereeError, match="Nothing was sent"):
             ref.review(**bad)
     assert len(sent) == 1
+
+
+def test_odd_receipts_are_refused_without_crashing():
+    c = CASES["valid-3x2"]
+    p = c["receipt"]["payload"]
+    r = verify_review_outcome(dict(p, pieces=[p["pieces"][0], None]), task=c["given"]["task"], pieces=c["given"]["pieces"])
+    assert not r["ok"] and "Piece 2's record in the receipt is malformed." in r["problems"]
+    for tier in ("constructor", "toString", "__proto__"):
+        assert verify_review_outcome(dict(p, tier=tier))["problems"] == [
+            f"A review-multi-v1 receipt must be for a multi-part tier (review-3x2 or review-3x3), not {tier}."]
+    r = verify_review_outcome(dict(p, funding="free"), task=c["given"]["task"], pieces=c["given"]["pieces"])
+    assert "Multi-part reviews are paid only, but this receipt says it was free." in r["problems"]
+    r = verify_review_outcome(dict(p, result=dict(p["result"], unanimous=True)), task=c["given"]["task"], pieces=c["given"]["pieces"])
+    assert "The receipt's unanimous flag doesn't match the votes." in r["problems"]
+    assert verify_review_outcome(c["receipt"], task=c["given"]["task"], output=None, pieces=None)["ok"]  # None means not given
+    # Whole numbers written as 31.0 (after some re-serialisation) count as whole numbers, as in JavaScript.
+    floats = dict(p, pieces=[dict(x, chars=float(x["chars"])) for x in p["pieces"]], votes=[dict(v, issues_dropped=float(v["issues_dropped"])) for v in p["votes"]])
+    r = verify_review_outcome(floats, task=c["given"]["task"], pieces=c["given"]["pieces"])
+    assert not any("malformed" in x or "issues_dropped" in x for x in r["problems"]), r["problems"]

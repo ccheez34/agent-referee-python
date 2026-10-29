@@ -257,6 +257,11 @@ def _format_problem(p: Any, kind: str = "match") -> Optional[str]:
     return None
 
 
+def _is_int(v: Any) -> bool:
+    """A whole number as JavaScript's Number.isInteger sees it (31 or 31.0, never a bool)."""
+    return not isinstance(v, bool) and (isinstance(v, int) or (isinstance(v, float) and v.is_integer()))
+
+
 def _check_pieces(p: Any, output: Optional[str], pieces: Any, problems: List[str]) -> None:
     """The multi-part part of a ``review-multi-v1`` check: the receipt's piece list is well formed, ``pieces_sha256``
     is the hash of it, there's no ``output_sha256``, and (when you pass the pieces you hold) each piece's name, sha256
@@ -277,8 +282,7 @@ def _check_pieces(p: Any, output: Optional[str], pieces: Any, problems: List[str
             and isinstance(_get(r, "name"), str)
             and isinstance(_get(r, "sha256"), str)
             and re.fullmatch(r"[0-9a-f]{64}", _get(r, "sha256")) is not None
-            and isinstance(_get(r, "chars"), int)
-            and not isinstance(_get(r, "chars"), bool)
+            and _is_int(_get(r, "chars"))
             and _get(r, "chars") > 0
         )
         if not ok:
@@ -394,8 +398,14 @@ def verify_review_outcome(
             problems.append("The reviewers aren't from three different AI companies.")
         for i, v in enumerate(votes):
             d = _get(v, "issues_dropped")
-            if not (isinstance(d, int) and not isinstance(d, bool) and d >= 0):
+            if not (_is_int(d) and d >= 0):
                 problems.append(f"Vote {i + 1} is missing issues_dropped (always present in a multi-part receipt).")
+        if _same(_get(p, "funding"), "free"):
+            problems.append("Multi-part reviews are paid only, but this receipt says it was free.")
+        if votes:
+            first = _get(votes[0], "verdict")
+            if not _same(_get(_get(p, "result"), "unanimous"), all(_same(_get(v, "verdict"), first) for v in votes)):
+                problems.append("The receipt's unanimous flag doesn't match the votes.")
     tally = {k: 0 for k in REVIEW_VERDICTS}
     for v in votes:
         verdict = _get(v, "verdict")
