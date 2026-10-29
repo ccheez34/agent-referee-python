@@ -30,7 +30,11 @@ __all__ = [
 PUBLIC_KEY = "vM2GY6ZEYc/omRlIFrzu0TaMGtjHXQtchg9d7lPKkTY="
 
 REVIEW_VERDICTS = ["pass", "needs_changes", "fail", "cannot_assess"]
-JUDGE_TIERS = ["judge", "judge-2", "judge-3"]
+JUDGE_TIERS = ["judge", "judge-2", "judge-3", "judge-3x2", "judge-3x3"]
+#: Multi-part judge tiers: how many pieces each side submits. Three judges from three companies read every piece.
+JUDGE_MULTI_PIECES = {"judge-3x2": 2, "judge-3x3": 3}
+JUDGE_FORMAT = "judge-multi-v1"
+JUDGE_MULTI_FORMAT_VERSION = "agent-referee-judge-v5-multi"
 _REVIEW_SIZE = {"review": 1, "review-3": 3, "review-3x2": 3, "review-3x3": 3}
 _RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
 
@@ -241,10 +245,10 @@ MULTI_FORMAT = "review-multi-v1"
 MULTI_PIECES = {"review-3x2": 2, "review-3x3": 3}
 
 #: Receipt formats this client can check, by kind of receipt. Single-piece receipts have no ``receipt_format`` field;
-#: multi-part reviews are ``review-multi-v1``. Any other format (``judge-multi-v1`` until this client learns it, or a
+#: multi-part reviews are ``review-multi-v1`` and multi-part judge matches ``judge-multi-v1``. Any other format (or a
 #: format on the wrong kind of receipt) is refused, never checked the old way: an old check could recompute the
 #: verdict and miss what the new format changed.
-KNOWN_RECEIPT_FORMATS: Dict[str, tuple] = {"review": (MULTI_FORMAT,), "match": ()}
+KNOWN_RECEIPT_FORMATS: Dict[str, tuple] = {"review": (MULTI_FORMAT,), "match": (JUDGE_FORMAT,)}
 
 
 def _format_problem(p: Any, kind: str = "match") -> Optional[str]:
@@ -515,6 +519,86 @@ def _criteria_pick(scores: Any, criteria: List[Dict[str, Any]]) -> Dict[str, Any
     return {"totals": totals, "pick": pick}
 
 
+def _piece_text(x: Any) -> Any:
+    return x if isinstance(x, str) else x.get("text") if isinstance(x, dict) else None
+
+
+def _check_judge_pieces(p: Any, given: Any, problems: List[str]) -> None:
+    """The multi-part part of a ``judge-multi-v1`` check (see the JS client's checkJudgePieces, same messages)."""
+    n = JUDGE_MULTI_PIECES[_get(p, "tier")]
+    proof = _nn(_get(p, "proof"), {})
+    out = _nn(_get(p, "outcome"), {})
+    judge = _nn(_get(proof, "judge"), {})
+    if isinstance(proof, dict) and "submission_sha256" in proof:
+        problems.append("A multi-part judge receipt never has proof.submission_sha256; this one does.")
+    if not _same(_get(judge, "format_version"), JUDGE_MULTI_FORMAT_VERSION):
+        problems.append(f"The judges' instructions should be {JUDGE_MULTI_FORMAT_VERSION}; this receipt says {_s(_get(judge, 'format_version'))[:60]}.")
+    parties = _jsort(x for x in _nn(_get(p, "parties"), []) if isinstance(x, str))
+    forfeited = _nn(_get(out, "forfeited"), [])
+    forfeited = forfeited if isinstance(forfeited, list) else []
+    by_forfeit = _truthy(_get(out, "by_forfeit"))
+    expect_sides = [s for s in parties if s not in forfeited] if by_forfeit else parties
+    pieces = _get(proof, "pieces")
+    pieces = pieces if isinstance(pieces, dict) else {}
+    hashes = _get(proof, "pieces_sha256")
+    hashes = hashes if isinstance(hashes, dict) else {}
+    sides = _jsort(pieces.keys())
+    if sides != expect_sides:
+        problems.append(
+            "A forfeit receipt must show the pieces of the side that submitted, and only those." if by_forfeit
+            else "A judged receipt must have both sides' pieces."
+        )
+    if _jsort(hashes.keys()) != sides:
+        problems.append("pieces_sha256 must name exactly the sides that have pieces.")
+    for side in sides:
+        recs = pieces[side]
+        if not isinstance(recs, list) or len(recs) != n:
+            problems.append(f"{_s(side)} should have {n} pieces on {_s(_get(p, 'tier'))}; the receipt lists {len(recs) if isinstance(recs, list) else 'none'}.")
+            continue
+        for i, r in enumerate(recs):
+            ok = (
+                isinstance(r, dict)
+                and _same(_get(r, "index"), i + 1)
+                and isinstance(_get(r, "sha256"), str)
+                and re.fullmatch(r"[0-9a-f]{64}", _get(r, "sha256")) is not None
+                and _is_int(_get(r, "chars"))
+                and _get(r, "chars") > 0
+            )
+            if not ok:
+                problems.append(f"{_s(side)}'s piece {i + 1} record in the receipt is malformed.")
+        if not _same(sha256_hex(_canon(recs)), _get(hashes, side)):
+            problems.append(f"{_s(side)}'s pieces_sha256 doesn't match its list of pieces.")
+    if not by_forfeit:
+        panel = _nn(_get(judge, "panel"), [])
+        models = [_s(_get(x, "model")) for x in panel] if isinstance(panel, list) else []
+        if len(models) != 3 or len({_company(m) for m in models}) != 3:
+            problems.append("The judges aren't three, from three different AI companies.")
+    if given is None:
+        return
+    for side, texts0 in (given.items() if isinstance(given, dict) else []):
+        recs = pieces.get(side)
+        texts = [_piece_text(x) for x in texts0] if isinstance(texts0, (list, tuple)) else None
+        if not isinstance(recs, list):
+            problems.append(f"The receipt has no pieces for {_s(side)}.")
+            continue
+        if texts is None or len(texts) != n:
+            problems.append(f"{_s(side)} has {n} pieces on {_s(_get(p, 'tier'))}; you passed {len(texts) if texts is not None else 'something that is not a list'}.")
+            continue
+        if any(not isinstance(x, str) for x in texts):
+            problems.append(f"A piece you passed for {_s(side)} has no text.")
+            continue
+        hs = [sha256_hex(x) for x in texts]
+        rec_hs = [_s(_get(r, "sha256")) for r in recs]
+        if sorted(hs) == sorted(rec_hs) and hs != rec_hs:
+            problems.append(f"These are {_s(side)}'s pieces, but in a different order.")
+            continue
+        for i, h in enumerate(hs):
+            if h != _get(recs[i], "sha256"):
+                problems.append(f"{_s(side)}'s piece {i + 1} is different from the one in the receipt.")
+            elif not _same(utf16_len(texts[i]), _get(recs[i], "chars")):
+                problems.append(f"{_s(side)}'s piece {i + 1} length in the receipt (chars) is wrong.")
+
+
 def _check_judge_decision(p: Any, problems: List[str], trusts: List[str]) -> None:
     out = _nn(_get(p, "outcome"), {})
     judge = _nn(_get(_get(p, "proof"), "judge"), {})
@@ -628,9 +712,17 @@ def find_contradictions(receipt: Any, acks: Iterable[Any] = ()) -> List[Dict[str
         elif _same(step, "submit"):
             if seat in forfeited:
                 flag(f"{_s(seat)} is listed as forfeiting after the service accepted its submission.")
-            h = _get(_get(proof, "submission_sha256"), seat)
-            if _truthy(h) and not _same(h, _get(a, "position_sha256")):
-                flag(f"{_s(seat)}'s submission was changed.")
+            if _same(_get(a, "receipt_format"), JUDGE_FORMAT) or _same(_get(p, "receipt_format"), JUDGE_FORMAT):
+                # Multi-part judge tiers: the ack names the side's pieces; the receipt must show exactly those.
+                recs = _get(_get(proof, "pieces"), seat)
+                if recs is UNDEF or recs is None:
+                    flag(f"{_s(seat)}'s accepted pieces are missing from the receipt.")
+                elif _canon(recs) != _canon(_nn(_get(a, "pieces"), None)) or not _same(_get(_get(proof, "pieces_sha256"), seat), _get(a, "pieces_sha256")):
+                    flag(f"{_s(seat)}'s submission was changed.")
+            else:
+                h = _get(_get(proof, "submission_sha256"), seat)
+                if _truthy(h) and not _same(h, _get(a, "position_sha256")):
+                    flag(f"{_s(seat)}'s submission was changed.")
         elif _same(step, "join"):
             paid = _get(_get(p, "paid_by"), seat)
             if _truthy(paid) and _truthy(_get(a, "paid_by")) and not _same(paid, a["paid_by"]):
@@ -638,13 +730,19 @@ def find_contradictions(receipt: Any, acks: Iterable[Any] = ()) -> List[Dict[str
     return out
 
 
-def verify_outcome(receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
+def verify_outcome(
+    receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]] = None, pieces: Optional[Dict[str, List[Any]]] = None
+) -> Dict[str, Any]:
     """Re-derive a match receipt's result yourself, without trusting the service's arithmetic. No network.
 
     Checks every reveal against its commitment, then recomputes the winner (or picked option) the way the service
     does. Pass ``seat`` (the :class:`Seat` you played with) so it also confirms the receipt holds exactly what you
     committed and revealed, that it describes the match you agreed to, and that none of the service's signed step
     acknowledgments contradict it. Doesn't check the signature: use :func:`verify_signature` too.
+
+    For a multi-part judge match (``judge-3x2``, ``judge-3x3``; ``receipt_format: "judge-multi-v1"``) pass ``pieces``,
+    ``{seat: [text, ...]}`` for the sides whose pieces you hold, to confirm the receipt holds exactly them. A seat that
+    submitted pieces checks its own.
 
     Returns ``{"ok", "recomputed", "problems", "trusts", "evidence"}``.
     """
@@ -656,6 +754,15 @@ def verify_outcome(receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]]
     fp = _format_problem(p)
     if fp:
         return {"ok": False, "recomputed": False, "problems": [fp], "trusts": trusts, "evidence": []}
+    multi_judge = _same(_get(p, "receipt_format"), JUDGE_FORMAT)
+    t = _get(p, "tier")
+    is_mj_tier = isinstance(t, str) and t in JUDGE_MULTI_PIECES
+    if multi_judge and not is_mj_tier:
+        return {"ok": False, "recomputed": False, "problems": [
+            f"A {JUDGE_FORMAT} receipt must be for a multi-part judge tier (judge-3x2 or judge-3x3), not {_s(t)[:40]}."], "trusts": trusts, "evidence": []}
+    if is_mj_tier and not multi_judge:
+        return {"ok": False, "recomputed": False, "problems": [
+            f"A {t} receipt must say receipt_format {JUDGE_FORMAT}; this one doesn't, so it can't be checked."], "trusts": trusts, "evidence": []}
     out = p["outcome"]
     proof = _nn(_get(p, "proof"), {})
 
@@ -724,6 +831,12 @@ def verify_outcome(receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]]
 
     tier = _get(p, "tier")
     if tier in JUDGE_TIERS:
+        if multi_judge:
+            given = pieces
+            mine = getattr(me, "pieces", None) if me is not None else None
+            if given is None and mine is not None:
+                given = {me.seat: mine}
+            _check_judge_pieces(p, given, problems)
         if not _truthy(_get(out, "by_forfeit")):
             _check_judge_decision(p, problems, trusts)
         return done(False)

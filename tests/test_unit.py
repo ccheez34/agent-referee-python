@@ -408,14 +408,20 @@ def test_control_todays_receipts_still_pass():
     assert verify_series([judge])["ok"] is True  # so the series refusals below aren't a check that refuses everything
 
 
-def test_judge_receipts_with_any_format_are_refused_even_as_judge_3():
+def test_judge_receipts_with_an_unknown_format_are_refused_and_judge_multi_v1_only_on_its_tiers():
+    # Since 0.3.0 judge-multi-v1 is checked (tests/test_multi_judge.py runs the server's vectors), but only on
+    # judge-3x2 and judge-3x3: on judge-3 it would otherwise recompute from the votes and pass.
     from agent_referee_client import verify_outcome
 
     judge = _fixtures()[0]
-    for fmt in ["judge-multi-v1", *FALSY_AND_ODD]:
+    for fmt in ["judge-multi-v2", "review-multi-v1", *FALSY_AND_ODD]:
         assert verify_outcome(dict(judge, receipt_format=fmt))["problems"] == [format_msg(_shown(fmt))], fmt
         assert verify_outcome(dict(judge, receipt_format=fmt))["ok"] is False
-    for tier in ("judge-3x2", ["judge-3"]):
+    assert verify_outcome(dict(judge, receipt_format="judge-multi-v1"))["problems"] == [
+        "A judge-multi-v1 receipt must be for a multi-part judge tier (judge-3x2 or judge-3x3), not judge-3."]
+    assert verify_outcome(dict(judge, tier="judge-3x2"))["problems"] == [
+        "A judge-3x2 receipt must say receipt_format judge-multi-v1; this one doesn't, so it can't be checked."]
+    for tier in ("judge-9x9", ["judge-3"]):
         c = verify_outcome(dict(judge, tier=tier))
         assert c["ok"] is False and c["problems"] == [f'Unknown tier "{_shown(tier) if not isinstance(tier, list) else "judge-3"}".']
 
@@ -458,6 +464,6 @@ def test_series_with_an_unknown_format_receipt_anywhere_is_refused():
 
     judge = _fixtures()[0]
     bad = lambda f: dict(judge, receipt_format=f)  # noqa: E731
-    for series, fmt in (([bad("judge-multi-v1")], "judge-multi-v1"), ([judge, bad(None)], None), ([judge, judge, bad("foo")], "foo"), ([bad(""), judge], "")):
+    for series, fmt in (([bad("judge-multi-v9")], "judge-multi-v9"), ([judge, bad(None)], None), ([judge, judge, bad("foo")], "foo"), ([bad(""), judge], "")):
         c = verify_series(series)
         assert c["ok"] is False and c["problems"] == [format_msg(_shown(fmt))]

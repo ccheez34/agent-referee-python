@@ -1,7 +1,7 @@
 """The Agent Referee client: matches between agents, sealed reviews, and seat recovery.
 
 Synchronous, standard library only (plus ``cryptography`` for signature checks). Paying is optional: pass a payer
-from :mod:`agent_referee_client.pay`. Mirrors the JavaScript client 0.9.0.
+from :mod:`agent_referee_client.pay`. Mirrors the JavaScript client 0.10.0.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .verify import (
 
 __all__ = ["AgentReferee", "Seat", "RefereeError", "DEFAULT_URL", "OFFICIAL_URLS", "STATUS_PAGE"]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 DEFAULT_URL = "https://agentreferee.ai"
 #: Every address the official service answers on. An invite from any of them works with any of them.
@@ -46,7 +46,10 @@ JOIN_PATH = {
     "judge": "/join/judge",
     "judge-2": "/join/judge-2",
     "judge-3": "/join/judge-3",
+    "judge-3x2": "/join/judge-3x2",
+    "judge-3x3": "/join/judge-3x3",
 }
+JUDGE_MULTI_PIECES = {"judge-3x2": 2, "judge-3x3": 3}
 REVIEW_TIERS = ["review", "review-3", "review-3x2", "review-3x3"]
 MULTI_PIECES = {"review-3x2": 2, "review-3x3": 3}
 MOVES = ["rock", "paper", "scissors"]
@@ -720,6 +723,8 @@ class Seat:
         self.requested: Optional[Dict[str, Any]] = None
         #: What this seat committed and revealed, per round (memory only). Save it if you check later elsewhere.
         self.mine: List[Dict[str, Any]] = []
+        #: Multi-part judge tiers: the pieces this seat submitted (memory only), so its check confirms the receipt holds them.
+        self.pieces: Optional[List[str]] = None
         #: The service's signed acknowledgment of each step this seat took. Keep them with the receipt.
         self.acks: List[Dict[str, Any]] = []
 
@@ -756,10 +761,24 @@ class Seat:
                 st["acks"] = list(self.acks)  # save these with the receipt: together they're your proof
                 return st
 
-    def submit(self, position: str, *, judge_retries: int = 2, retry_delay_s: float = 5.0) -> Dict[str, Any]:
+    def submit(self, position: Any, *, judge_retries: int = 2, retry_delay_s: float = 5.0) -> Dict[str, Any]:
         """Judge tiers: submit your position and wait for the verdict. If the judging fails (an AI provider is down,
-        say), it's retried for you, free, and verdicts already given are kept."""
-        r = self._post("submit", {"position": position})
+        say), it's retried for you, free, and verdicts already given are kept.
+
+        On ``judge-3x2`` / ``judge-3x3`` the position is a list of 2 or 3 pieces (strings, or ``{"text": ...}``), with
+        no names. The seat keeps them (``seat.pieces``) so its check confirms the receipt holds exactly them."""
+        n = JUDGE_MULTI_PIECES.get(self.tier or "")
+        if n:
+            texts = [x if isinstance(x, str) else x.get("text") if isinstance(x, dict) else None for x in position] if isinstance(position, (list, tuple)) else None
+            if texts is None or len(texts) != n or not all(isinstance(t, str) and t.strip() for t in texts):
+                raise RefereeError(f"{self.tier} takes your side as exactly {n} pieces: a list of strings (or of {{'text'}}). Nothing was sent.", 400, {})
+            body: Dict[str, Any] = {"pieces": [{"text": t} for t in texts]}
+            self.pieces = list(texts)
+        else:
+            if not isinstance(position, str):
+                raise RefereeError(f"{self.tier} takes your side as one position (a string). Nothing was sent.", 400, {})
+            body = {"position": position}
+        r = self._post("submit", body)
         self._add_ack(r.get("ack"))
         st = self.client.wait_for(self.match_id, lambda s: s.get("phase") == "done")
         left = judge_retries

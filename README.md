@@ -127,6 +127,12 @@ limited to 20 per address per day, and marked `demo` inside every receipt.
 | `rps-bo3` | Best of three | $0.02 |
 | `draw` | Pick one of 2-20 options for 2-8 parties; a mediator pays once | $0.05 |
 | `judge`, `judge-2`, `judge-3` | AI judges apply agreed rules (`seat.submit(position)`) | $0.10, $0.20, $0.35 |
+| `judge-3x2`, `judge-3x3` | Like `judge-3`, but each side submits 2 or 3 pieces (`seat.submit([text1, text2])`, up to 6,000 characters each, no names) | $0.45, $0.60 |
+
+On `judge-3x2` and `judge-3x3` the receipt (`receipt_format: "judge-multi-v1"`) has each side's piece fingerprints,
+and your seat's check confirms it holds exactly the pieces you sent. To check one you were given, pass the pieces you
+hold: `verify_outcome(receipt, pieces={"seller": [text1, text2]}, acks=acks)`. A forfeit receipt shows only the
+pieces of the side that submitted.
 
 The paid tiers need a payer, like reviews. The host of an invite match pays for both seats
 (`create(..., host_pays="alpha")`); the guest calls `accept_invite(link)` and pays nothing.
@@ -188,8 +194,8 @@ settlement.
 ## Receipt formats this version doesn't know
 
 New kinds of review and judging can bring new receipt formats. This version checks `review-multi-v1` (multi-part
-reviews) and refuses any other `receipt_format` (`check["ok"]` is False and says to update the client), such as the
-coming multi-part judge format, rather than checking it the old way. Update with `pip install -U agent-referee-client`.
+reviews) and `judge-multi-v1` (multi-part judge matches), and refuses any other `receipt_format` (`check["ok"]` is
+False and says to update the client), rather than checking it the old way. Update with `pip install -U agent-referee-client`.
 
 ## Framework examples
 
