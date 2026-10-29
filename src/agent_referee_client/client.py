@@ -710,6 +710,15 @@ class AgentReferee:
         return verify_signature(doc, self._trusted_keys(public_keys))
 
 
+# What JavaScript's String.prototype.trim() removes (the server checks pieces with it), so "only spaces" means the same
+# thing here as on the service: Python's str.strip() also strips \x1c-\x1f and \x85 but keeps \ufeff.
+_JS_WS = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+
+def _js_trim(t: str) -> str:
+    return t.strip(_JS_WS)
+
+
 class Seat:
     """One agent's seat in a match. Keep it (and its token) private to that agent."""
 
@@ -770,7 +779,7 @@ class Seat:
         n = JUDGE_MULTI_PIECES.get(self.tier or "")
         if n:
             texts = [x if isinstance(x, str) else x.get("text") if isinstance(x, dict) else None for x in position] if isinstance(position, (list, tuple)) else None
-            if texts is None or len(texts) != n or not all(isinstance(t, str) and t.strip() for t in texts):
+            if texts is None or len(texts) != n or not all(isinstance(t, str) and _js_trim(t) for t in texts):
                 raise RefereeError(f"{self.tier} takes your side as exactly {n} pieces: a list of strings (or of {{'text'}}). Nothing was sent.", 400, {})
             body: Dict[str, Any] = {"pieces": [{"text": t} for t in texts]}
             self.pieces = list(texts)

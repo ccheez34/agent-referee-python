@@ -523,8 +523,9 @@ def _piece_text(x: Any) -> Any:
     return x if isinstance(x, str) else x.get("text") if isinstance(x, dict) else None
 
 
-def _check_judge_pieces(p: Any, given: Any, problems: List[str]) -> None:
-    """The multi-part part of a ``judge-multi-v1`` check (see the JS client's checkJudgePieces, same messages)."""
+def _check_judge_pieces(p: Any, given: List[Any], problems: List[str]) -> None:
+    """The multi-part part of a ``judge-multi-v1`` check (see the JS client's checkJudgePieces, same messages).
+    ``given`` is a list of (seat, texts) pairs: the pieces passed in, plus the seat's own (both are checked)."""
     n = JUDGE_MULTI_PIECES[_get(p, "tier")]
     proof = _nn(_get(p, "proof"), {})
     out = _nn(_get(p, "outcome"), {})
@@ -550,6 +551,13 @@ def _check_judge_pieces(p: Any, given: Any, problems: List[str]) -> None:
         )
     if _jsort(hashes.keys()) != sides:
         problems.append("pieces_sha256 must name exactly the sides that have pieces.")
+    if by_forfeit:
+        # The service only signs a forfeit for a two-party match where one side submitted: that side wins, and the
+        # other is listed as forfeiting. The pieces show who submitted, so the winner and the forfeit list must match.
+        submitted = sides[0] if len(sides) == 1 else None
+        others = [s for s in parties if s != submitted]
+        if submitted is None or not _same(_get(out, "winner"), submitted) or _jsort(x for x in forfeited if isinstance(x, str)) != others or len(forfeited) != len(others):
+            problems.append("In a forfeit, the side that submitted must be the winner, and only the other side may be listed as forfeiting.")
     for side in sides:
         recs = pieces[side]
         if not isinstance(recs, list) or len(recs) != n:
@@ -558,6 +566,7 @@ def _check_judge_pieces(p: Any, given: Any, problems: List[str]) -> None:
         for i, r in enumerate(recs):
             ok = (
                 isinstance(r, dict)
+                and sorted(r.keys()) == ["chars", "index", "sha256"]
                 and _same(_get(r, "index"), i + 1)
                 and isinstance(_get(r, "sha256"), str)
                 and re.fullmatch(r"[0-9a-f]{64}", _get(r, "sha256")) is not None
@@ -573,9 +582,7 @@ def _check_judge_pieces(p: Any, given: Any, problems: List[str]) -> None:
         models = [_s(_get(x, "model")) for x in panel] if isinstance(panel, list) else []
         if len(models) != 3 or len({_company(m) for m in models}) != 3:
             problems.append("The judges aren't three, from three different AI companies.")
-    if given is None:
-        return
-    for side, texts0 in (given.items() if isinstance(given, dict) else []):
+    for side, texts0 in given:
         recs = pieces.get(side)
         texts = [_piece_text(x) for x in texts0] if isinstance(texts0, (list, tuple)) else None
         if not isinstance(recs, list):
@@ -832,10 +839,15 @@ def verify_outcome(
     tier = _get(p, "tier")
     if tier in JUDGE_TIERS:
         if multi_judge:
-            given = pieces
+            given: List[Any] = []
+            if pieces is not None:
+                if not isinstance(pieces, dict):
+                    problems.append('pieces must be by seat: { "seat": ["text 1", "text 2"] }.')
+                else:
+                    given.extend(pieces.items())
             mine = getattr(me, "pieces", None) if me is not None else None
-            if given is None and mine is not None:
-                given = {me.seat: mine}
+            if mine:
+                given.append((me.seat, mine))
             _check_judge_pieces(p, given, problems)
         if not _truthy(_get(out, "by_forfeit")):
             _check_judge_decision(p, problems, trusts)

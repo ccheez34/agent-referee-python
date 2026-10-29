@@ -108,3 +108,35 @@ def test_submit_sends_pieces_and_refuses_wrong_shapes(monkeypatch):
     with pytest.raises(RefereeError, match="one position"):
         Seat(ref, "m2", "alpha", "tok", "judge-3").submit(["a", "b"])
     assert len(sent) == 1
+
+
+FORFEIT_MSG = "In a forfeit, the side that submitted must be the winner, and only the other side may be listed as forfeiting."
+
+
+@pytest.mark.parametrize("change", [{"winner": "beta"}, {"winner": None}, {"winner": "mallory"}, {"forfeited": ["alpha", "beta"]}])
+def test_forfeit_winner_and_list_must_match_who_submitted(change):
+    c = CASES["valid-forfeit"]
+    p = dict(c["receipt"]["payload"], outcome=dict(c["receipt"]["payload"]["outcome"], **change))
+    r = verify_outcome(p, pieces=c["given"]["pieces"])
+    assert not r["ok"] and FORFEIT_MSG in r["problems"], r["problems"]
+
+
+def test_seat_pieces_are_checked_alongside_passed_pieces_and_records_are_exact():
+    c = CASES["wrong-piece-text"]
+    seat = Seat(AgentReferee("https://agentreferee.ai", public_keys=KEYS), c["receipt"]["payload"]["match_id"], "alpha", "tok", "judge-3x2")
+    seat.pieces = list(c["given"]["pieces"]["alpha"])
+    for pieces in (None, {}, {"beta": c["given"]["pieces"]["beta"]}):
+        r = verify_outcome(c["receipt"], seat=seat, pieces=pieces)
+        assert "alpha's piece 2 is different from the one in the receipt." in r["problems"], r["problems"]
+    import copy
+    v = copy.deepcopy(CASES["valid-3x2"]["receipt"]["payload"])
+    v["proof"]["pieces"]["alpha"][0]["name"] = "alice"
+    v["proof"]["pieces_sha256"]["alpha"] = sha256_hex(canonical_json(v["proof"]["pieces"]["alpha"]))
+    assert "alpha's piece 1 record in the receipt is malformed." in verify_outcome(v)["problems"]
+    assert 'pieces must be by seat: { "seat": ["text 1", "text 2"] }.' in verify_outcome(CASES["valid-3x2"]["receipt"], pieces=[["a", "b"]])["problems"]
+
+
+def test_submit_counts_whitespace_like_the_server():
+    from agent_referee_client.client import _js_trim
+    assert _js_trim("\x1c") == "\x1c"  # the server (JavaScript trim) accepts this as text
+    assert _js_trim("﻿ 　") == ""  # and refuses this as only spaces
