@@ -467,3 +467,46 @@ def test_series_with_an_unknown_format_receipt_anywhere_is_refused():
     for series, fmt in (([bad("judge-multi-v9")], "judge-multi-v9"), ([judge, bad(None)], None), ([judge, judge, bad("foo")], "foo"), ([bad(""), judge], "")):
         c = verify_series(series)
         assert c["ok"] is False and c["problems"] == [format_msg(_shown(fmt))]
+
+
+class _StubPayer:
+    wallet = "0x1"
+
+    def payment_header(self, *a):
+        return "proof-" + "x" * 30
+
+
+_OFFER = {"x402Version": 1, "accepts": [{"scheme": "exact", "network": "base", "maxAmountRequired": "15000", "resource": "r", "payTo": "0xF6B53AaCf822A36b7B2aF9C45BabE6E367ede4d3", "maxTimeoutSeconds": 60, "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}]}
+
+
+def test_a_redirect_after_a_paid_request_keeps_the_saved_proof():
+    store = MemoryProofStore()
+
+    def join(headers, body):
+        if "X-PAYMENT" not in headers:
+            return 402, _OFFER, None
+        return 302, "", {"location": "https://elsewhere.example/x"}
+
+    t = Script(("POST", "/join/weighted", join, None, None))
+    ref = AgentReferee("https://agentreferee.ai", transport=t, payer=_StubPayer(), proof_store=store)
+    with pytest.raises(RefereeError, match="never follows redirects") as e:
+        ref._call("POST", "/join/weighted", {"match_id": "a" * 24, "seat": "alpha"}, pay=True, recoverable=True)
+    assert e.value.status == 302 and e.value.body == {"redirect": True, "location": "https://elsewhere.example/x"}
+    assert len(store.list()) == 1  # kept: a redirect says nothing about what happened to the payment
+
+
+def test_join_stops_after_one_recovery_when_the_paid_join_is_redirected():
+    paid = {"n": 0}
+
+    def join(headers, body):
+        if "X-PAYMENT" not in headers:
+            return 402, _OFFER, None
+        paid["n"] += 1
+        return 307, "", {"location": "https://elsewhere.example/join"}
+
+    t = Script(("GET", "/matches/", 200, STATUS, None), ("POST", "/join/weighted", join, None, None),
+               ("POST", "/matches/" + "a" * 24 + "/recover", 404, {"error": "no such payment"}, None))
+    with pytest.raises(RefereeError) as e:
+        AgentReferee(transport=t, payer=_StubPayer(), proof_store=MemoryProofStore(), join_retries=3).join("a" * 24, "alpha")
+    assert e.value.status == 307 and e.value.body["redirect"] is True and paid["n"] == 1
+    assert sum(1 for _, p, _, _ in t.sent if p.endswith("/recover")) == 1

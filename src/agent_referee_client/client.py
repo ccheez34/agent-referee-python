@@ -32,7 +32,7 @@ from .verify import (
 
 __all__ = ["AgentReferee", "Seat", "RefereeError", "DEFAULT_URL", "OFFICIAL_URLS", "STATUS_PAGE"]
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 DEFAULT_URL = "https://agentreferee.ai"
 #: Every address the official service answers on. An invite from any of them works with any of them.
@@ -249,8 +249,9 @@ class AgentReferee:
             paid_headers = {**headers, "X-PAYMENT": payment, "Access-Control-Expose-Headers": "X-PAYMENT-RESPONSE"}
             status, rh, raw = self._send(method, url, paid_headers, data)  # no answer: the proof stays saved
             # A definite answer (2xx: done; 4xx: the payment never settled) means the proof isn't needed any more.
-            # A 5xx can come from a gateway after the seat was already claimed, so keep it.
-            if status < 500 or not recoverable:  # only a paid join can be recovered later
+            # Keep it otherwise: a 5xx can come from a gateway after the seat was already claimed, and a redirect
+            # says nothing about what happened to the payment.
+            if 200 <= status < 300 or 400 <= status < 500 or not recoverable:  # only a paid join can be recovered later
                 with self._lock:
                     self._payments.pop(key, None)
                 if recoverable and self.proof_store is not None:
@@ -274,11 +275,15 @@ class AgentReferee:
                     retry = float(rh["retry-after"])
                 except ValueError:
                     retry = None
-            if 300 <= status < 400 and not msg:
-                msg = (
-                    f"The service answered with a redirect (HTTP {status} to {str(rh.get('location', '?'))[:200]}). The client "
-                    "never follows redirects, so nothing (and no payment) was sent there. Check the client's url."
-                )
+            if 300 <= status < 400:
+                loc = str(rh["location"])[:200] if rh.get("location") else None
+                if not msg:
+                    msg = (
+                        f"{self.url} answered with a redirect (HTTP {status}{' to ' + loc if loc else ''}). The client never "
+                        "follows redirects, so nothing was sent to another address; a paid request's proof went only to the "
+                        "client's url. Check the client's url."
+                    )
+                d = {"redirect": True, "location": loc}
             raise RefereeError(str(msg) if msg else f"HTTP {status}", status, d, retry)
         return d
 
@@ -419,7 +424,7 @@ class AgentReferee:
                     # 404: that payment never claimed a seat, so it never settled. Safe to try joining again.
                     if re_.status == 404:
                         self._forget_payment(path, body)  # it never settled: nothing to recover later either
-                        if retries > 0:
+                        if retries > 0 and not 300 <= e.status < 400:  # a redirect won't go away by paying again
                             retries -= 1
                             continue
                         raise e from re_

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-referee-client"
-version = "0.3.0"
+version = "0.3.1"
 description = "Python client for Agent Referee (agentreferee.ai): sealed review of an AI agent's output by independent AI reviewers, fair tie-breaks and AI judges between agents, and offline checks of the signed receipts."
 readme = "README.md"
 license = "MIT"

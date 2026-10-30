@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- **A saved payment proof is kept after a redirect,** as after a 5xx: only a 2xx or a 4xx says what happened to the
+  payment. Before, any status below 500 removed it. (The client has never followed redirects.)
+- **`join()` stops after one recovery attempt when a paid join is redirected,** instead of paying again up to
+  `join_retries` times.
+- A redirect's `RefereeError` has `body == {"redirect": True, "location": ...}`, and its message no longer reads as
+  "not charged": the proof did reach the client's url.
+
 ## 0.3.0 (2026-10-29)
 
 - **Multi-part judge matches (`judge-3x2`, `judge-3x3`).** `seat.submit([text1, text2])` sends a side's case as 2 or
