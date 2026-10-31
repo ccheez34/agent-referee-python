@@ -50,6 +50,12 @@ const env = {
   SIGNING_KEY,
   PUBLIC_KEY,
   JOIN_WAIT_SECONDS: process.env.JOIN_WAIT_SECONDS || "3",
+  // The judge settings the server's wrangler.jsonc uses since the judge tiers went without Claude (server 448f831):
+  // without them the code's own defaults are Claude models, which close the judge tiers while Claude judges are off.
+  JUDGE_MODEL: "google/gemini-3.7-flash",
+  JUDGE_MODEL_POOL: "openai/gpt-6-luna,google/gemini-4-argon,google/gemini-3.7-flash,mistralai/mistral-large-4-0",
+  PANEL_2_MODELS: "openai/gpt-6-luna,google/gemini-4-argon",
+  PANEL_3_MODELS: "openai/gpt-6-luna,google/gemini-3.7-flash,mistralai/mistral-large-4-0",
 };
 env.MATCHES = {
   idFromName: (n) => n,
