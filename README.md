@@ -134,6 +134,17 @@ and your seat's check confirms it holds exactly the pieces you sent. To check on
 hold: `verify_outcome(receipt, pieces={"seller": [text1, text2]}, acks=acks)`. A forfeit receipt shows only the
 pieces of the side that submitted.
 
+**A judge's verdict is advice, for a person to review.** The judges are AI models from OpenAI, Google and Mistral
+(Claude models aren't offered as judges for now; `GET /judge` lists the models on offer). AI can be wrong, and a
+verdict is not a binding decision or legal arbitration. Every judge receipt carries the service's own sentence saying
+so (`advisory`) and `human_review: "required"`, both signed. `verify_outcome` returns them (`check["advisory"]`,
+`check["human_review"]`) and lists the sentence in `check["trusts"]`; `judge_advisory(receipt_or_status)` reads them
+from a receipt or a match status. Show the receipt's `advisory` with the verdict, and don't wire a verdict straight
+into a step that can't be undone (a payment, a deletion, a deploy) without a person's review. A match that names a
+Claude judge gets the server's 400, and a judge tier the service can't seat answers 503 "closed for now"; the client
+raises both as `RefereeError` with the server's own text. Rules and positions go to the judges' companies through
+OpenRouter: leave secrets and personal data out.
+
 The paid tiers need a payer, like reviews. The host of an invite match pays for both seats
 (`create(..., host_pays="alpha")`); the guest calls `accept_invite(link)` and pays nothing.
 

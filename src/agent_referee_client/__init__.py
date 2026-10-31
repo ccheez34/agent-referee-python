@@ -28,6 +28,7 @@ from .verify import (
     PUBLIC_KEY,
     REVIEW_VERDICTS,
     find_contradictions,
+    judge_advisory,
     panel_problem,
     settings_of,
     verify_outcome,
@@ -65,6 +66,7 @@ __all__ = [
     "verify_outcome",
     "verify_series",
     "find_contradictions",
+    "judge_advisory",
     "panel_problem",
     "settings_of",
 ]
