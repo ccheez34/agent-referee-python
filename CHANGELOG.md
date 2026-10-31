@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased (branch `proof-store-dir-fsync`, on top of 0.4.0)
+- **`FileProofStore.save` no longer stops a paid request when the filesystem can't sync a directory** (ledger 3.0-U01). The proof is already written, flushed and renamed into place by then; errors that mean "unsupported here" (EINVAL, ENOTSUP, EBADF, EACCES, EPERM, EISDIR, ENOSYS) are skipped, and a real I/O error still raises. 4 new tests, 3 of which failed before the fix.
+
 ## 0.4.0 (unreleased; release candidate on release-0.4.0-rc)
 
 ### Judge tiers without Claude (the client side of the judge spec, §9)

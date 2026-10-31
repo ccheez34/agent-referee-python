@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import errno
 import os
 import re
 import sys
@@ -199,6 +200,10 @@ def default_proof_dir() -> str:
     return os.path.join(base, "agent-referee", "proofs")
 
 
+# Errors that mean "this filesystem can't open or sync a directory", not "the disk failed" (ledger 3.0-U01).
+_DIR_SYNC_UNSUPPORTED = {e for e in (getattr(errno, n, None) for n in ("EINVAL", "ENOTSUP", "EOPNOTSUPP", "EBADF", "EACCES", "EPERM", "EISDIR", "ENOSYS")) if e is not None}
+
+
 class FileProofStore:
     """One small JSON file per in-flight paid join, readable only by your user where the OS supports it.
 
@@ -237,12 +242,19 @@ class FileProofStore:
         except OSError:
             pass
         os.replace(tmp, path)
-        if os.name == "posix":  # make the new directory entry durable too
-            dfd = os.open(self.directory, os.O_RDONLY)
+        if os.name == "posix":  # make the new directory entry durable too, where the filesystem allows it
+            # The proof itself is already written, flushed and in place. Some filesystems (network, FUSE, some
+            # container mounts) can't open or sync a directory; that's not a reason to stop the paid request, so those
+            # errors are skipped (ledger 3.0-U01). A real I/O error still raises.
             try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
+                dfd = os.open(self.directory, os.O_RDONLY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            except OSError as e:
+                if e.errno not in _DIR_SYNC_UNSUPPORTED:
+                    raise
 
     def remove(self, key: str) -> None:
         try:
