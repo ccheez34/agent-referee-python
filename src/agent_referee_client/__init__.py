@@ -29,6 +29,7 @@ from .verify import (
     REVIEW_VERDICTS,
     find_contradictions,
     judge_advisory,
+    receipt_terms,
     panel_problem,
     settings_of,
     verify_outcome,
@@ -67,6 +68,13 @@ __all__ = [
     "verify_series",
     "find_contradictions",
     "judge_advisory",
+    "receipt_terms",
+    "is_terms_refusal",
     "panel_problem",
     "settings_of",
 ]
+
+
+def is_terms_refusal(err: BaseException) -> bool:
+    """True when the service refused a request because the Terms weren't accepted (or an old version was sent)."""
+    return isinstance(err, RefereeError) and "x-accept-terms" in str(err).lower()

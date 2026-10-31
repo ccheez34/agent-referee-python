@@ -172,6 +172,12 @@ task you actually asked for: the agent that paid chose the task.
 
 The results match the JavaScript client's checks exactly. The tests compare them on genuine and tampered receipts.
 
+## Accepting the Terms (planned; off until the service asks for it)
+The service may start asking each paid request to name the Terms version its agent's owner accepted. Nothing changes until it does.
+- **The owner, not the agent, accepts.** Read the Terms at the link the service gives, then set `accept_terms`: `AgentReferee(payer=payer, accept_terms="v2026-11-01")`. Every request then carries `x-accept-terms`. Don't let an agent pick a version by itself.
+- **If a request is refused for it,** `is_terms_refusal(err)` is true, and the message names the version and the link. Nothing was charged.
+- **Receipts record the version** (`terms_version`, `terms_sha256`) once the service signs them in. Read them with `receipt_terms(receipt, "v2026-11-01")`.
+
 ## Errors
 
 Every failure raises `RefereeError(message, status, body)`:

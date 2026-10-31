@@ -737,6 +737,20 @@ def find_contradictions(receipt: Any, acks: Iterable[Any] = ()) -> List[Dict[str
     return out
 
 
+def receipt_terms(doc: Any, expected: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The Terms a receipt records, if the service signed them in (``terms_version``, ``terms_sha256``), or None for
+    receipts without them. With ``expected`` (e.g. ``"v2026-11-01"``), ``matches`` says whether it's that version.
+
+    Returns ``{"version": str, "sha256": str | None, "matches": bool | None}`` or None.
+    """
+    p = _payload(doc) if isinstance(doc, dict) else {}
+    if not isinstance(p, dict) or not isinstance(p.get("terms_version"), str):
+        return None
+    sha = p.get("terms_sha256")
+    sha = sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha) else None
+    return {"version": p["terms_version"], "sha256": sha, "matches": None if expected is None else p["terms_version"] == expected}
+
+
 def judge_advisory(doc: Any) -> Dict[str, Any]:
     """The advisory note on a judge-tier verdict, read from a receipt, its payload or a match status: the service's own
     sentence (``advisory``) and its human-review marker (``human_review``, ``"required"`` on every judge tier). Both

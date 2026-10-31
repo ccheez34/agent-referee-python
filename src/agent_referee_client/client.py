@@ -165,8 +165,14 @@ class AgentReferee:
         proof_store: Any = None,
         http_timeout_s: float = 330.0,
         transport: Optional[Transport] = None,
+        accept_terms: Optional[str] = None,
     ) -> None:
         self.url = url.rstrip("/")
+        # The Terms version the agent's OWNER accepted (e.g. "v2026-11-01"), sent as x-accept-terms on every request.
+        # Unset, nothing is sent. An agent must not accept Terms on its owner's behalf by itself.
+        if accept_terms is not None and not re.fullmatch(r"v\d{4}-\d{2}-\d{2}", str(accept_terms)):
+            raise ValueError('accept_terms must look like "v2026-11-01" (the version on the Terms page).')
+        self.accept_terms = accept_terms
         self.payer = payer
         if isinstance(public_keys, str):
             public_keys = [public_keys]
@@ -219,6 +225,8 @@ class AgentReferee:
         sent = None if body is None else json.dumps(_clean(body), ensure_ascii=False, separators=(",", ":"))
         data = None if sent is None else sent.encode("utf-8")
         headers = {"content-type": "application/json", "accept": "application/json", "user-agent": f"agent-referee-client-python/{__version__}"}
+        if self.accept_terms:
+            headers["x-accept-terms"] = self.accept_terms
         status, rh, raw = self._send(method, url, headers, data)
         if status == 402 and pay:
             if self.payer is None:

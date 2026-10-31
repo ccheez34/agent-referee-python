@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (branch `terms-acceptance`, on top of 0.4.0)
+
+### Accepting the Terms (option A of the terms-binding spec; off by default)
+- `accept_terms` (constructor keyword): the owner's accepted Terms version, sent as `x-accept-terms` on every request. Unset, nothing is sent; a malformed version raises `ValueError`.
+- `receipt_terms(doc, expected=None)` reads `terms_version` and `terms_sha256`; `is_terms_refusal(err)` recognises the service's refusal.
+- Waits for the lawyer's choice between options A and B, and for the server side. Nothing is published.
+
 ## 0.4.0 (unreleased; release candidate on release-0.4.0-rc)
 
 ### Judge tiers without Claude (the client side of the judge spec, §9)
