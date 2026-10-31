@@ -737,6 +737,24 @@ def find_contradictions(receipt: Any, acks: Iterable[Any] = ()) -> List[Dict[str
     return out
 
 
+def judge_advisory(doc: Any) -> Dict[str, Any]:
+    """The advisory note on a judge-tier verdict, read from a receipt, its payload or a match status: the service's own
+    sentence (``advisory``) and its human-review marker (``human_review``, ``"required"`` on every judge tier). Both
+    are in the signed part of a judge receipt. Show ``advisory`` wherever you show a verdict, and hold the verdict for
+    a person when ``human_review_required`` is true. Luck tiers and reviews have neither.
+
+    Returns ``{"advisory": str | None, "human_review": str | None, "human_review_required": bool}``.
+    """
+    p = _payload(doc) if isinstance(doc, dict) else {}
+    if not isinstance(p, dict):
+        p = {}
+    a = p.get("advisory")
+    advisory = a if isinstance(a, str) and a.strip() else None
+    h = p.get("human_review")
+    human_review = h if isinstance(h, str) else None
+    return {"advisory": advisory, "human_review": human_review, "human_review_required": human_review == "required"}
+
+
 def verify_outcome(
     receipt: Any, seat: Any = None, acks: Optional[Iterable[Any]] = None, pieces: Optional[Dict[str, List[Any]]] = None
 ) -> Dict[str, Any]:
@@ -751,7 +769,9 @@ def verify_outcome(
     ``{seat: [text, ...]}`` for the sides whose pieces you hold, to confirm the receipt holds exactly them. A seat that
     submitted pieces checks its own.
 
-    Returns ``{"ok", "recomputed", "problems", "trusts", "evidence"}``.
+    Returns ``{"ok", "recomputed", "problems", "trusts", "evidence", "advisory", "human_review"}``. On judge tiers
+    ``advisory`` is the receipt's own signed sentence (show it with the verdict) and ``human_review`` is ``"required"``;
+    both are also listed in ``trusts``. Other tiers have ``None``.
     """
     p = _payload(receipt)
     problems: List[str] = []
@@ -779,8 +799,17 @@ def verify_outcome(
     if me is None:
         problems.extend(e["reason"] for e in evidence)
 
+    adv = judge_advisory(p)
+    if adv["advisory"]:
+        trusts.append(adv["advisory"])  # the receipt's own words, signed (judge spec §9): not a copy kept here
+    if adv["human_review_required"]:
+        trusts.append(
+            "The service marks this verdict for a person's review (human_review: required). Don't act on it in a step "
+            "that can't be undone until someone has reviewed it.")
+
     def done(recomputed: bool) -> Dict[str, Any]:
-        return {"ok": not problems, "recomputed": recomputed, "problems": problems, "trusts": trusts, "evidence": evidence}
+        return {"ok": not problems, "recomputed": recomputed, "problems": problems, "trusts": trusts, "evidence": evidence,
+                "advisory": adv["advisory"], "human_review": adv["human_review"]}
 
     requested = getattr(me, "requested", None) if me is not None else None
     if requested:

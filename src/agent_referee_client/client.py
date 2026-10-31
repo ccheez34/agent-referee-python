@@ -32,7 +32,7 @@ from .verify import (
 
 __all__ = ["AgentReferee", "Seat", "RefereeError", "DEFAULT_URL", "OFFICIAL_URLS", "STATUS_PAGE"]
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 DEFAULT_URL = "https://agentreferee.ai"
 #: Every address the official service answers on. An invite from any of them works with any of them.
