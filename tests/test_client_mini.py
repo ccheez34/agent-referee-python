@@ -1,6 +1,7 @@
 """The client end to end against tests/js/mini_server.mjs: the real server code for matches, acks, receipts and
 reviews, with fake AI answers and emulated payments. Skipped without Node 22.6+ and the server source."""
 
+import json
 import os
 import threading
 
@@ -260,7 +261,8 @@ def test_recover_pending_at_startup(mini, fake_payer):
 
 
 def test_judge3_rotate_and_picks_with_fake_judges(mini, fake_payer):
-    for panel in ["rotate", {"picks": {"buyer": "claude-opus-5-5", "seller": "openai/gpt-6-luna"}}]:
+    # No Claude model: the server refuses one as a judge while Claude judges are off (judge spec §3 rule 3).
+    for panel in ["rotate", {"picks": {"buyer": "mistralai/mistral-large-4-0", "seller": "openai/gpt-6-luna"}}]:
         a = client(mini, payer=fake_payer(350_000, "0x1111111111111111111111111111111111111111"), proof_store=False)
         b = client(mini, payer=fake_payer(350_000, "0x2222222222222222222222222222222222222222"), proof_store=False)
         m = a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins. Equal prices: the faster one.", panel=panel)
@@ -268,6 +270,22 @@ def test_judge3_rotate_and_picks_with_fake_judges(mini, fake_payer):
         ra, rb = both([lambda: sa.submit("Plan A: $10, 3 days."), lambda: sb.submit("Plan B: $12, 1 day.")])
         assert ra["check"]["ok"] and rb["check"]["ok"], (ra["check"]["problems"], rb["check"]["problems"])
         assert [x["payload"]["step"] for x in ra["acks"]] == ["join", "submit"]
+
+
+def test_judge_tiers_open_without_claude_and_a_claude_judge_is_refused_with_the_servers_text(mini):
+    a = client(mini)
+    for tier, panel in [("judge", None), ("judge-2", None), ("judge-3", None), ("judge-3", "rotate"),
+                        ("judge-3", {"picks": {"buyer": "mistralai/mistral-large-4-0", "seller": "openai/gpt-6-luna"}})]:
+        m = a.create(tier=tier, seats=["buyer", "seller"], rules="The cheaper plan wins.", panel=panel)
+        models = json.dumps(m.get("judge") or m)
+        assert "claude" not in models.lower(), (tier, panel, models[:200])
+        if "advisory" in m:
+            assert m.get("human_review") == "required"
+    with pytest.raises(RefereeError) as e:
+        a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins.",
+                 panel={"picks": {"buyer": "claude-opus-5-5", "seller": "openai/gpt-6-luna"}})
+    assert e.value.status == 400
+    assert "Claude" in str(e.value)
 
 
 def test_paid_review_receipt_must_name_this_payer(mini, fake_payer):
