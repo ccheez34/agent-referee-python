@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (branch judge-party-and-own-keys)
+
+- **Judge decisions are re-derived by the published rule in two more corners,** found in the team's checks (Nov 4
+  to 9), the same as in the JS client; a receipt that breaks one is reported like any other mismatch:
+  - Under `unanimous`, a common pick that names no party is no winner.
+  - Under `majority`, mistrial votes never count for a party, even one named `mistrial`.
+- Tests pin, with the JS client's receipts and messages, what this client already did: a party named `__proto__`
+  keeps its criteria total, a score counts only from the scores' own keys (none, or an empty one, counts 0), and a
+  vote for a name that isn't a party makes the tally a mismatch.
+
 ## 0.3.0 (2026-10-29)
 
 - **Multi-part judge matches (`judge-3x2`, `judge-3x3`).** `seat.submit([text1, text2])` sends a side's case as 2 or
