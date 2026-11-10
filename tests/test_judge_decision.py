@@ -92,3 +92,23 @@ def test_a_score_counts_only_from_an_own_key():
     assert verify_review_outcome(review)["problems"] == []
     review["votes"][1]["total"] = 42
     assert verify_review_outcome(review)["problems"] == ["Vote 2's weighted total doesn't match its scores."]
+
+
+def test_majority_mistrial_votes_never_count_for_a_party():
+    # The same hole 5.0 found in the service (Nov 9, 16:24): a party named "mistrial" shares the tally's mistrial
+    # entry, so two mistrial votes made it the winner. The service refuses that name since its fix; the check counts
+    # a party's own votes.
+    tally = {"a": 1, "mistrial": 2}
+    two_mistrials = panel_receipt(["a", "mistrial"], "majority", [None, None, "a"], {"winner": "mistrial", "tally": tally})
+    assert problems(two_mistrials) == ["By the majority rule the panel's decision should be a mistrial."]
+    assert problems(panel_receipt(["a", "mistrial"], "majority", [None, None, "a"], {"winner": None, "tally": tally})) == []
+    # Two real votes for that party still make it the winner.
+    assert problems(panel_receipt(["a", "mistrial"], "majority", ["mistrial", "mistrial", "a"], {"winner": "mistrial", "tally": tally})) == []
+
+
+def test_the_tally_gives_every_pick_its_own_key():
+    # A vote for a name that isn't a party makes the tally a mismatch, "__proto__" included (the JS client lost that
+    # vote from its tally until Nov 10; this client always caught it).
+    for name in ["__proto__", "constructor", "zed"]:
+        p = panel_receipt(["a", "b"], "majority", ["a", "a", name], {"winner": "a", "tally": {"a": 2, "b": 0, "mistrial": 0}})
+        assert problems(p) == ["The vote tally doesn't match the votes."], name

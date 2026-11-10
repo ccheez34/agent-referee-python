@@ -658,7 +658,10 @@ def _check_judge_decision(p: Any, problems: List[str], trusts: List[str]) -> Non
         # Every vote picks the same party. A common pick that names no party is no winner.
         winner = picks[0] if _truthy(picks[0]) and any(_same(picks[0], s) for s in parties) and all(_same(x, picks[0]) for x in picks) else None
     elif _same(rule, "majority"):
-        winner = next((s for s in parties if isinstance(tally.get(s), int) and tally[s] > len(picks) / 2), None)
+        # A party's votes are the picks that name it, counted apart from the tally: a party named "mistrial" shares the
+        # tally's mistrial entry, so two mistrial votes would have made it a majority winner (the service refuses that
+        # seat name, in any case, since Nov 9).
+        winner = next((s for s in parties if sum(1 for x in picks if _same(x, s)) > len(picks) / 2), None)
     else:
         problems.append(f'Unknown decision rule "{_s(rule)}".')
     if not _same(_nn(_get(out, "winner"), None), winner):
