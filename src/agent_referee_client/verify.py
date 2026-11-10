@@ -655,7 +655,8 @@ def _check_judge_decision(p: Any, problems: List[str], trusts: List[str]) -> Non
     rule = _get(judge, "decision_rule")
     winner: Any = None
     if _same(rule, "unanimous"):
-        winner = picks[0] if _truthy(picks[0]) and all(_same(x, picks[0]) for x in picks) else None
+        # Every vote picks the same party. A common pick that names no party is no winner.
+        winner = picks[0] if _truthy(picks[0]) and any(_same(picks[0], s) for s in parties) and all(_same(x, picks[0]) for x in picks) else None
     elif _same(rule, "majority"):
         winner = next((s for s in parties if isinstance(tally.get(s), int) and tally[s] > len(picks) / 2), None)
     else:
