@@ -19,7 +19,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # ubuntu-latest is Ubuntu 26.04 now, and setup-python has no Python 3.9 for it (the run of Nov 10, 2026 stopped at
+          # setup), so 3.9 runs on Ubuntu 24.04 instead.
+          - { os: ubuntu-latest, python: "3.9" }
         include:
+          - { os: ubuntu-24.04, python: "3.9" }
           # GitHub's Apple-silicon Macs were at capacity twice (jobs cancelled), so macOS runs one job on each Mac pool:
           # Apple silicon (macos-latest) and Intel (macos-15-intel), oldest and newest Python.
           - { os: macos-latest, python: "3.13" }
