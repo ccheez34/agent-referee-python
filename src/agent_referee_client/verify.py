@@ -866,6 +866,11 @@ def verify_outcome(
             ra, rb = _get(_get(r, "reveals"), a), _get(_get(r, "reveals"), b)
             if _truthy(ra) and _truthy(rb):
                 va, vb = _get(ra, "value"), _get(rb, "value")
+                non_move = [s for s, v in ((a, va), (b, vb)) if not (isinstance(v, str) and v in _RPS_BEATS)]
+                if non_move:
+                    for s in non_move:
+                        problems.append(f"Round {_s(_get(r, 'round'))}: {_s(s)} revealed something that isn't rock, paper or scissors.")
+                    continue
                 expected = None if _same(va, vb) else a if _same(_RPS_BEATS.get(va, UNDEF) if isinstance(va, str) else UNDEF, vb) else b
                 if not _same(_nn(_get(r, "winner"), None), expected):
                     problems.append(f"Round {_s(_get(r, 'round'))}: winner should be {_s(expected) if expected is not None else 'a tie'}.")
