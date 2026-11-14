@@ -29,7 +29,8 @@ const PUBLIC_KEY = b64(await crypto.subtle.exportKey("raw", kp.publicKey));
 // The judge settings from the server's wrangler.jsonc (its top-level "vars", which the live service deploys with), so
 // the stand-in judges as the live service does: Mistral out (Oct 31), judge-3's default closed with two companies, and
 // so on. A missing or unreadable file stops the stand-in: silently using other settings is what let them drift (Nov 13).
-const JUDGE_KEYS = ["CLAUDE_JUDGES_ENABLED", "JUDGE_MODEL", "JUDGE_MODEL_POOL", "JUDGE_EXCLUDE", "OPT_IN_MODELS", "PANEL_MODELS", "PANEL_2_MODELS", "PANEL_3_MODELS"];
+// review-3 has its own list (REVIEW_3_MODELS), taken too, so the reviews also run as the live service runs them.
+const JUDGE_KEYS = ["CLAUDE_JUDGES_ENABLED", "JUDGE_MODEL", "JUDGE_MODEL_POOL", "JUDGE_EXCLUDE", "OPT_IN_MODELS", "PANEL_MODELS", "PANEL_2_MODELS", "PANEL_3_MODELS", "REVIEW_3_MODELS"];
 /** JSON as wrangler.jsonc allows it: line and block comments, and trailing commas, outside strings, are dropped. */
 export function parseJsonc(text) {
   let out = "", i = 0;
