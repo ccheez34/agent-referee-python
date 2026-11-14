@@ -260,32 +260,72 @@ def test_recover_pending_at_startup(mini, fake_payer):
     assert ra["phase"] == "done" and rb["check"]["ok"]
 
 
-def test_judge3_rotate_and_picks_with_fake_judges(mini, fake_payer):
-    # No Claude model: the server refuses one as a judge while Claude judges are off (judge spec §3 rule 3).
-    for panel in ["rotate", {"picks": {"buyer": "mistralai/mistral-large-4-0", "seller": "openai/gpt-6-luna"}}]:
-        a = client(mini, payer=fake_payer(350_000, "0x1111111111111111111111111111111111111111"), proof_store=False)
-        b = client(mini, payer=fake_payer(350_000, "0x2222222222222222222222222222222222222222"), proof_store=False)
-        m = a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins. Equal prices: the faster one.", panel=panel)
-        sa, sb = both([lambda: a.join(m["match_id"], "buyer"), lambda: b.join(m["match_id"], "seller")])
-        ra, rb = both([lambda: sa.submit("Plan A: $10, 3 days."), lambda: sb.submit("Plan B: $12, 1 day.")])
-        assert ra["check"]["ok"] and rb["check"]["ok"], (ra["check"]["problems"], rb["check"]["problems"])
-        assert [x["payload"]["step"] for x in ra["acks"]] == ["join", "submit"]
+# The judge settings come from the server's own wrangler.jsonc (tests/js/mini_server.mjs reads them), so these tests
+# follow the live service: today the judge pool has two companies (OpenAI, Google), Mistral is excluded until it passes
+# a judge trial, and Claude judges are off. A third company comes from the server's opt-in list, named by the agents.
+THIRD_COMPANY = "deepseek/deepseek-v4-pro-0813"
 
 
-def test_judge_tiers_open_without_claude_and_a_claude_judge_is_refused_with_the_servers_text(mini):
+def _models(s):
+    return [m.strip() for m in (s or "").split(",") if m.strip()]
+
+
+def _companies(models):
+    return {m.split("/")[0] if "/" in m else "anthropic" for m in models}
+
+
+def test_judge3_with_a_third_company_named_by_the_agents_with_fake_judges(mini, fake_payer):
+    a = client(mini, payer=fake_payer(350_000, "0x1111111111111111111111111111111111111111"), proof_store=False)
+    b = client(mini, payer=fake_payer(350_000, "0x2222222222222222222222222222222222222222"), proof_store=False)
+    m = a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins. Equal prices: the faster one.",
+                 panel={"picks": {"buyer": THIRD_COMPANY, "seller": "openai/gpt-6-luna"}})
+    named = json.dumps(m.get("judge") or m).lower()
+    assert "claude" not in named and "mistral" not in named, named[:300]
+    sa, sb = both([lambda: a.join(m["match_id"], "buyer"), lambda: b.join(m["match_id"], "seller")])
+    ra, rb = both([lambda: sa.submit("Plan A: $10, 3 days."), lambda: sb.submit("Plan B: $12, 1 day.")])
+    assert ra["check"]["ok"] and rb["check"]["ok"], (ra["check"]["problems"], rb["check"]["problems"])
+    assert [x["payload"]["step"] for x in ra["acks"]] == ["join", "submit"]
+
+
+def test_judge_tiers_follow_the_servers_judge_settings(mini):
+    s = mini["judge"]
+    assert s.get("JUDGE_MODEL_POOL"), "the stand-in didn't report the server's judge settings"
+    pool, excluded = _models(s.get("JUDGE_MODEL_POOL")), _models(s.get("JUDGE_EXCLUDE"))
+    claude_on = s.get("CLAUDE_JUDGES_ENABLED") == "true"
     a = client(mini)
-    for tier, panel in [("judge", None), ("judge-2", None), ("judge-3", None), ("judge-3", "rotate"),
-                        ("judge-3", {"picks": {"buyer": "mistralai/mistral-large-4-0", "seller": "openai/gpt-6-luna"}})]:
-        m = a.create(tier=tier, seats=["buyer", "seller"], rules="The cheaper plan wins.", panel=panel)
-        models = json.dumps(m.get("judge") or m)
-        assert "claude" not in models.lower(), (tier, panel, models[:200])
+    create = lambda tier, panel=None: a.create(tier=tier, seats=["buyer", "seller"], rules="The cheaper plan wins.", panel=panel)
+
+    def refused(tier, panel, status, text):
+        with pytest.raises(RefereeError) as e:
+            create(tier, panel)
+        assert e.value.status == status and text in str(e.value), (tier, panel, e.value.status, str(e.value)[:200])
+
+    # judge and judge-2: open, and no Claude while the switch is off
+    for tier in ("judge", "judge-2"):
+        m = create(tier)
+        if not claude_on:
+            assert "claude" not in json.dumps(m.get("judge") or m).lower(), (tier, m)
         if "advisory" in m:
             assert m.get("human_review") == "required"
-    with pytest.raises(RefereeError) as e:
-        a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins.",
-                 panel={"picks": {"buyer": "claude-opus-5-5", "seller": "openai/gpt-6-luna"}})
-    assert e.value.status == 400
-    assert "Claude" in str(e.value)
+    # judge-3's default: open only when PANEL_3_MODELS spans three companies; otherwise refused before payment
+    if len(_companies(_models(s.get("PANEL_3_MODELS")))) >= 3:
+        create("judge-3")
+    else:
+        refused("judge-3", None, 503, "judge-3 needs a third AI company")
+    # rotate: one model per company of the judge pool
+    if len(_companies(pool)) >= 3:
+        create("judge-3", "rotate")
+    else:
+        refused("judge-3", "rotate", 503, "a rotating panel of 3 needs 3")
+    # a third company the agents name themselves: open
+    m = create("judge-3", {"picks": {"buyer": THIRD_COMPANY, "seller": "openai/gpt-6-luna"}})
+    assert "claude" not in json.dumps(m.get("judge") or m).lower()
+    # a model that hasn't passed its judge trial: refused while it's excluded
+    for model in excluded:
+        refused("judge-3", {"picks": {"buyer": model, "seller": "openai/gpt-6-luna"}}, 400, model)
+    # Claude: refused while Claude judges are off, with the server's own text
+    if not claude_on:
+        refused("judge-3", {"picks": {"buyer": "claude-opus-5-5", "seller": "openai/gpt-6-luna"}}, 400, "Claude")
 
 
 def test_paid_review_receipt_must_name_this_payer(mini, fake_payer):
