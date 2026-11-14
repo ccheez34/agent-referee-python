@@ -9,6 +9,7 @@
 //   node --experimental-strip-types mini_server.mjs SERVER_SRC_DIR
 // Prints {"port": N, "public_key": "..."} on its first line, then serves until killed.
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
@@ -24,6 +25,56 @@ const kp = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "
 const b64 = (buf) => Buffer.from(buf).toString("base64");
 const SIGNING_KEY = b64(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
 const PUBLIC_KEY = b64(await crypto.subtle.exportKey("raw", kp.publicKey));
+
+// The judge settings from the server's wrangler.jsonc (its top-level "vars", which the live service deploys with), so
+// the stand-in judges as the live service does: Mistral out (Oct 31), judge-3's default closed with two companies, and
+// so on. A missing or unreadable file stops the stand-in: silently using other settings is what let them drift (Nov 13).
+const JUDGE_KEYS = ["CLAUDE_JUDGES_ENABLED", "JUDGE_MODEL", "JUDGE_MODEL_POOL", "JUDGE_EXCLUDE", "OPT_IN_MODELS", "PANEL_MODELS", "PANEL_2_MODELS", "PANEL_3_MODELS"];
+/** JSON as wrangler.jsonc allows it: line and block comments, and trailing commas, outside strings, are dropped. */
+export function parseJsonc(text) {
+  let out = "", i = 0;
+  // Past whitespace and comments from k: the index of the next character that counts.
+  const next = (k) => {
+    for (;;) {
+      while (k < text.length && /\s/.test(text[k])) k++;
+      if (text.startsWith("//", k)) { while (k < text.length && text[k] !== "\n") k++; continue; }
+      if (text.startsWith("/*", k)) { const e = text.indexOf("*/", k + 2); k = e < 0 ? text.length : e + 2; continue; }
+      return k;
+    }
+  };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') { // a string, copied whole, escapes included
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else if (text.startsWith("//", i) || text.startsWith("/*", i)) {
+      i = next(i);
+    } else if (c === "," && (text[next(i + 1)] === "}" || text[next(i + 1)] === "]")) {
+      i++; // a trailing comma
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return JSON.parse(out);
+}
+function judgeSettings(file) {
+  let vars;
+  try {
+    vars = parseJsonc(readFileSync(file, "utf8")).vars;
+  } catch (e) {
+    console.error(`mini_server: can't read the judge settings from ${file} (${e.message}); set AGENT_REFEREE_SERVER_SRC to the server's src folder`);
+    process.exit(2);
+  }
+  if (!vars || typeof vars !== "object" || typeof vars.JUDGE_MODEL_POOL !== "string") {
+    console.error(`mini_server: ${file} has no "vars" with JUDGE_MODEL_POOL`);
+    process.exit(2);
+  }
+  return Object.fromEntries(JUDGE_KEYS.filter((k) => typeof vars[k] === "string").map((k) => [k, vars[k]]));
+}
+const JUDGE_SETTINGS = judgeSettings(join(src, "..", "wrangler.jsonc"));
 
 const PRICES = { rps: 10000, "rps-bo3": 20000, weighted: 15000, draw: 50000, judge: 100000, "judge-2": 200000, "judge-3": 350000, review: 50000, "review-3": 200000 };
 
@@ -50,12 +101,10 @@ const env = {
   SIGNING_KEY,
   PUBLIC_KEY,
   JOIN_WAIT_SECONDS: process.env.JOIN_WAIT_SECONDS || "3",
-  // The judge settings the server's wrangler.jsonc uses since the judge tiers went without Claude (server 448f831):
-  // without them the code's own defaults are Claude models, which close the judge tiers while Claude judges are off.
-  JUDGE_MODEL: "google/gemini-3.7-flash",
-  JUDGE_MODEL_POOL: "openai/gpt-6-luna,google/gemini-4-argon,google/gemini-3.7-flash,mistralai/mistral-large-4-0",
-  PANEL_2_MODELS: "openai/gpt-6-luna,google/gemini-4-argon",
-  PANEL_3_MODELS: "openai/gpt-6-luna,google/gemini-3.7-flash,mistralai/mistral-large-4-0",
+  // The judge settings: read from the checked-out server's own wrangler.jsonc (below), so they can't drift from the
+  // live service's. Without them the code's own defaults are Claude models, which close the judge tiers while Claude
+  // judges are off.
+  ...JUDGE_SETTINGS,
 };
 env.MATCHES = {
   idFromName: (n) => n,
@@ -223,4 +272,4 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: String(e?.stack ?? e) }));
   }
 });
-server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ port: server.address().port, public_key: PUBLIC_KEY })));
+server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ port: server.address().port, public_key: PUBLIC_KEY, judge: JUDGE_SETTINGS })));

@@ -50,7 +50,7 @@ def mini():
     )
     try:
         info = json.loads(p.stdout.readline())
-        yield {"url": f"http://127.0.0.1:{info['port']}", "key": info["public_key"], "reset": lambda: reset(info["port"])}
+        yield {"url": f"http://127.0.0.1:{info['port']}", "key": info["public_key"], "judge": info.get("judge", {}), "reset": lambda: reset(info["port"])}
     finally:
         p.terminate()
         try:
