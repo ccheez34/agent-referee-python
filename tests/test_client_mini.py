@@ -279,6 +279,9 @@ def test_judge3_with_a_third_company_named_by_the_agents_with_fake_judges(mini, 
     b = client(mini, payer=fake_payer(350_000, "0x2222222222222222222222222222222222222222"), proof_store=False)
     m = a.create(tier="judge-3", seats=["buyer", "seller"], rules="The cheaper plan wins. Equal prices: the faster one.",
                  panel={"picks": {"buyer": THIRD_COMPANY, "seller": "openai/gpt-6-luna"}})
+    # The response must name the panel, so the check below has something to check (2.0's 1526 note).
+    panel = [p.get("model") for p in (m.get("judge") or {}).get("panel", [])]
+    assert len(panel) == 3 and THIRD_COMPANY in panel and "openai/gpt-6-luna" in panel, panel
     named = json.dumps(m.get("judge") or m).lower()
     assert "claude" not in named and "mistral" not in named, named[:300]
     sa, sb = both([lambda: a.join(m["match_id"], "buyer"), lambda: b.join(m["match_id"], "seller")])
